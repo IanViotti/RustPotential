@@ -1,0 +1,9 @@
+[package]
+name = "full_potential"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ndarray = "0.17.2"
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.0"

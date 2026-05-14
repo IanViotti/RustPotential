@@ -1,0 +1,13 @@
+# ===================================================
+# This file is used to configure the RustyMesher job.
+# ===================================================
+
+# jobname (used for directory and files creation)
+# This will be the name of the output folder inside 'job_files/'
+meshname = "naca0012_mesh.vtk"
+
+jobname = "naca0012_M080"
+
+u_inf = 10.0
+
+                
