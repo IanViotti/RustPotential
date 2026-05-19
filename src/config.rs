@@ -12,5 +12,11 @@ pub struct Config {
     pub jobname: String,
 
     pub u_inf: f64,
+
+    pub max_iterations: usize,
+
+    pub gamma: f64,
+
+    pub C: f64,
     
 }
