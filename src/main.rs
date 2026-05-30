@@ -16,6 +16,7 @@ fn main() {
 
     let config = job_utils::read_config("job_config.toml");
 
+
     // Initialize the job directory structure based on the job name specified in the configuration.
     job_utils::init_job_directory(&config);
 

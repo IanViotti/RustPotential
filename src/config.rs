@@ -11,12 +11,22 @@ pub struct Config {
 
     pub jobname: String,
 
-    pub u_inf: f64,
+    pub Mach_inf: f64,
 
     pub max_iterations: usize,
 
     pub gamma: f64,
 
     pub C: f64,
+
+    #[serde(skip)]
+    pub u_inf: f64,
     
+}
+
+impl Config {
+    /// Método para popular as variáveis que dependem da física após a leitura do arquivo
+    pub fn compute_derived_variables(&mut self) {
+        self.u_inf = ((self.gamma + 1.0) / (self.gamma - 1.0 + 2.0 / self.Mach_inf.powi(2))).sqrt();
+    }
 }

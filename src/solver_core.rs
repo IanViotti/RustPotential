@@ -27,72 +27,105 @@ pub fn solve(grid: &Grid, config: &config::Config) -> Array2<solver_utils::Point
     domain
 }
 
-/// Iterative loop to drive the density and potential fields to convergence
 fn main_solver_loop(
     config: &config::Config, 
     grid: &Grid, 
     domain: &mut Array2<solver_utils::PointData>
 ) {
-    println!("Entering main solver loop...");
-    
+    // Sequência ótima do parâmetro alpha de Holst para acelerar convergência
+    let alphas = [0.2, 0.8, 3.0, 10.0, 30.0]; 
+    let omega = 0.5; // Fator de relaxação
+    let laplace_warmup_iters = 20; // Primeiras 100 iterações são incompressíveis
+
     for iteration in 0..config.max_iterations {
-        println!("Iteration: {}", iteration);
+        let alpha = alphas[iteration % alphas.len()]; // Cicla os alphas
+
+        enforce_boundary_conditions(grid, domain);
         
-        // =========================================================================
-        // TODO: IMPLEMENT HOLST AND BALLHAUS AF2 SCHEME HERE
-        // =========================================================================
-        // 
-        // Expected Sequence per Iteration:
-        //
-        // 1. Compute Contravariant Velocities (U, V) at the half-points.
-        // 2. Compute isentropic density (rho) at the half-points.
-        // 3. Apply Holst's Artificial Density (rho_art) using Upwinding 
-        //    (checks local Mach number to add artificial viscosity in supersonic zones).
-        // 4. Calculate the Residual at each node (i,j) using conservative finite differences.
-        // 5. Check for convergence (e.g., maximum absolute residual < tolerance).
-        //    If converged, break the loop early.
-        // 6. AF2 Sweep 1: Solve the first bidiagonal/tridiagonal system (Eta direction).
-        // 7. AF2 Sweep 2: Solve the second tridiagonal system (Xi direction).
-        // 8. Update the nodal velocity potential (phi) using the computed correction.
-        // 
-        // =========================================================================
-
-        solve_field(config, grid, domain);
-    }   
-}
-
-fn solve_field(config: &config::Config, grid: &Grid, domain: &mut Array2<solver_utils::PointData>) {
-    // Placeholder function to represent the entire AF2 solution process for one iteration.
-    // The actual implementation will involve multiple steps as outlined in the main_solver_loop comments.
-
-    // 1. Compute contravariant velocities and densities at half-points
-    // 2. Compute residuals at nodes
-    // 3. Check for convergence
-    // 4. Perform AF2 sweeps to solve for corrections
-    // 5. Update nodal phi values
-
-    // For demonstration, we will just call a placeholder function to update phi at one point.
-
-    for i in 1..grid.imax-1 {
-        for j in 1..grid.jmax-1 {
-            let L_phi_ij = calc_L_phi_ij(config, grid, domain, i, j);
+        // 2. Calcular o campo de Resíduos L(phi)
+        let mut max_res = 0.0;
+        let mut residual = Array2::<f64>::zeros((grid.imax, grid.jmax));
+        
+        for i in 1..grid.imax-1 {
+            for j in 1..grid.jmax-1 {
+                let res = calc_L_phi_ij(config, grid, domain, i, j);
+                residual[[i, j]] = res;
+                if res.abs() > max_res { max_res = res.abs(); }
+            }
         }
-    }
+
+        println!("Iteration: {} | Max Residual: {:.2e}", iteration, max_res);
+        if max_res < 1E-6 {
+            println!("Converged!");
+            break;
+        }
+
+        // Matrizes intermediárias para o AF2
+        let mut f_inter = Array2::<f64>::zeros((grid.imax, grid.jmax));
+        let mut delta_phi = Array2::<f64>::zeros((grid.imax, grid.jmax));
+
+        // =========================================================
+        // Passo 1 (AF2): Varredura em Eta (j) - Radial
+        // =========================================================
+        for i in 1..grid.imax {
+            // Extrair coeficientes A, B, C e rhs (alpha * omega * residual) da linha 'i'
+            // Aplicar Algoritmo de Thomas (TDMA) simples com condições de contorno
+            // Salvar resultado em f_inter[[i, j]]
+            solver_utils::solve_tdma_eta(i, alpha, omega, grid, domain, &residual, &mut f_inter);
+        }
+
+        // =========================================================
+        // Passo 2 (AF2): Varredura em Xi (i) - Azimutal (Malha O)
+        // =========================================================
+        for j in 1..grid.jmax-1 {
+            // Extrair coeficientes A, B, C e rhs (f_inter) do anel 'j'
+            // ATENÇÃO: Aqui DEVE ser usado o Solver Tridiagonal Periódico (Cíclico)
+            // Salvar o resultado final em delta_phi[[i, j]]
+            solver_utils::solve_periodic_tdma_xi(j, alpha, grid, domain, &f_inter, &mut delta_phi);
+        }
+
+        // =========================================================
+        // Atualização do Potencial Phi
+        // =========================================================
+        for i in 1..grid.imax {
+            for j in 1..grid.jmax-1 {
+                domain[[i, j]].flow_ij.phi += delta_phi[[i, j]];
+            }
+        }
+
+
+        // =========================================================
+        // O AQUECIMENTO INCOMPRESSÍVEL (Laplace Warm-up)
+        // =========================================================
+        // Se estivermos na fase de aquecimento, nós sobrescrevemos o rho 
+        // recém-calculado no calc_L_phi_ij e forçamos ele a voltar para 1.0.
+        // Isso impede a formação de choques espúrios no início.
+        if iteration < laplace_warmup_iters {
+            for i in 0..grid.imax {
+                for j in 0..grid.jmax {
+                    domain[[i, j]].flow_ij.rho = 1.0;
+                    domain[[i, j]].flow_ip12j.rho = 1.0;
+                    domain[[i, j]].flow_ijp12.rho = 1.0;
+                }
+            }
+        }
+        
+    }   
 }
 
 fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solver_utils::PointData>, i: usize, j: usize) -> f64{
 
     let gamma = config.gamma;
 
-    // === Parameters for ip12j ===
-    // Phi derivatives
+    // =========================================================
+    // === Parameters for ip12j (Face na direção Xi) ===
+    // =========================================================
     let phi_xi_ip12j = domain[[i+1, j]].flow_ij.phi - domain[[i, j]].flow_ij.phi; 
     let phi_eta_ip12_j = 0.5 * (
-        0.5 * (domain[[i, j+1]].flow_ij.phi + domain[[i, j-1]].flow_ij.phi) +
-        0.5 * (domain[[i+1, j+1]].flow_ij.phi + domain[[i+1, j-1]].flow_ij.phi)
+        0.5 * (domain[[i, j+1]].flow_ij.phi - domain[[i, j-1]].flow_ij.phi) +
+        0.5 * (domain[[i+1, j+1]].flow_ij.phi - domain[[i+1, j-1]].flow_ij.phi)
     );
 
-    // Contravariant 
     domain[[i, j]].flow_ip12j.U = 
         domain[[i, j]].metrics_ip12j.A1 * phi_xi_ip12j + 
         domain[[i, j]].metrics_ip12j.A2 * phi_eta_ip12_j;
@@ -101,18 +134,20 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
         domain[[i, j]].metrics_ip12j.A2 * phi_xi_ip12j + 
         domain[[i, j]].metrics_ip12j.A3 * phi_eta_ip12_j;
 
-    // rho
-    domain[[i, j]].flow_ip12j.rho = (1.0 - (gamma - 1.0 ) / (gamma + 1.0) * (domain[[i, j]].flow_ip12j.U * phi_xi_ip12j + domain[[i, j]].flow_ip12j.V * phi_eta_ip12_j)).powf(1.0 / (gamma - 1.0));
+    // CORREÇÃO 1: Proteção termodinâmica (evita base negativa)
+    let q2_ip12j = domain[[i, j]].flow_ip12j.U * phi_xi_ip12j + domain[[i, j]].flow_ip12j.V * phi_eta_ip12_j;
+    let base_ip12j = 1.0 - ((gamma - 1.0) / (gamma + 1.0)) * q2_ip12j;
+    domain[[i, j]].flow_ip12j.rho = base_ip12j.max(1e-5).powf(1.0 / (gamma - 1.0));
 
-    // === Parameters for ijp12 ===
-    // Phi derivatives
-    let phi_xi_ijp12 = domain[[i, j+1]].flow_ij.phi - domain[[i, j]].flow_ij.phi; 
-    let phi_eta_ijp12 = 0.5 * (
-        0.5 * (domain[[i, j+1]].flow_ij.phi + domain[[i, j-1]].flow_ij.phi) +
-        0.5 * (domain[[i+1, j+1]].flow_ij.phi + domain[[i+1, j-1]].flow_ij.phi)
+    // =========================================================
+    // === Parameters for ijp12 (Face na direção Eta) ===
+    // =========================================================
+    let phi_eta_ijp12 = domain[[i, j+1]].flow_ij.phi - domain[[i, j]].flow_ij.phi;
+    let phi_xi_ijp12 = 0.5 * (
+        0.5 * (domain[[i+1, j]].flow_ij.phi - domain[[i-1, j]].flow_ij.phi) +
+        0.5 * (domain[[i+1, j+1]].flow_ij.phi - domain[[i-1, j+1]].flow_ij.phi)
     );
 
-    // Contravariant 
     domain[[i, j]].flow_ijp12.U = 
         domain[[i, j]].metrics_ijp12.A1 * phi_xi_ijp12 + 
         domain[[i, j]].metrics_ijp12.A2 * phi_eta_ijp12;
@@ -121,11 +156,21 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
         domain[[i, j]].metrics_ijp12.A2 * phi_xi_ijp12 + 
         domain[[i, j]].metrics_ijp12.A3 * phi_eta_ijp12;
 
-    // rho
-    domain[[i, j]].flow_ijp12.rho = (1.0 - (gamma - 1.0 ) / (gamma + 1.0) * (domain[[i, j]].flow_ijp12.U * phi_xi_ijp12 + domain[[i, j]].flow_ijp12.V * phi_eta_ijp12)).powf(1.0 / (gamma - 1.0));
+    // CORREÇÃO 2: Proteção termodinâmica (evita base negativa)
+    let q2_ijp12 = domain[[i, j]].flow_ijp12.U * phi_xi_ijp12 + domain[[i, j]].flow_ijp12.V * phi_eta_ijp12;
+    let base_ijp12 = 1.0 - ((gamma - 1.0) / (gamma + 1.0)) * q2_ijp12;
+    domain[[i, j]].flow_ijp12.rho = base_ijp12.max(1e-5).powf(1.0 / (gamma - 1.0));
 
-    // == Integer Point Rho ==
-    domain[[i,j]].flow_ij.rho = 0.25 * (domain[[i, j]].flow_ip12j.rho + domain[[i-1, j]].flow_ip12j.rho + domain[[i, j]].flow_ijp12.rho + domain[[i, j-1]].flow_ijp12.rho);
+    // =========================================================
+    // === Integer Point Rho (Média das 4 faces) ===
+    // =========================================================
+    
+    domain[[i, j]].flow_ij.rho = 0.25 * (
+        domain[[i, j]].flow_ip12j.rho + 
+        domain[[i-1, j]].flow_ip12j.rho + 
+        domain[[i, j]].flow_ijp12.rho + 
+        domain[[i, j-1]].flow_ijp12.rho
+    );
 
     // Transition function
     let v_ip12j: f64;
@@ -169,8 +214,8 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
     }
 
     // Artificial Density Coefficients
-    domain[[i,j]].flow_ip12j.rho_art = (1.0 - v_ip12j) * domain[[i, j]].flow_ip12j.rho + v_ip12j * domain[[i + r as usize, j]].flow_ip12j.rho;
-    domain[[i,j]].flow_ijp12.rho_art = (1.0 - v_ijp12) * domain[[i, j]].flow_ijp12.rho + v_ijp12 * domain[[i, j + s as usize]].flow_ijp12.rho;
+    domain[[i,j]].flow_ip12j.rho_art = (1.0 - v_ip12j) * domain[[i, j]].flow_ip12j.rho + v_ip12j * domain[[(i as i32 + r) as usize, j]].flow_ip12j.rho;
+    domain[[i,j]].flow_ijp12.rho_art = (1.0 - v_ijp12) * domain[[i, j]].flow_ijp12.rho + v_ijp12 * domain[[i, (j as i32 + s) as usize]].flow_ijp12.rho;
 
     // Residual operator
     let L_phi_ij = ((domain[[i,j]].flow_ip12j.rho_art * domain[[i,j]].flow_ip12j.U / domain[[i,j]].metrics_ip12j.J) - 
@@ -178,5 +223,63 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
                     ((domain[[i,j]].flow_ijp12.rho_art * domain[[i,j]].flow_ijp12.V / domain[[i,j]].metrics_ijp12.J) - 
                     (domain[[i,j-1]].flow_ijp12.rho_art * domain[[i,j-1]].flow_ijp12.V / domain[[i,j-1]].metrics_ijp12.J));
 
+    //println!("i: {}, j: {}, L_phi_ij: {:.2e}", i, j, L_phi_ij);
+    
     return L_phi_ij;
+}
+
+pub fn enforce_boundary_conditions(grid: &Grid, domain: &mut Array2<solver_utils::PointData>) {
+    let imax = grid.imax;
+    let jmax = grid.jmax;
+
+    // ====================================================================
+    // 1. Condição na Parede do Perfil (j = 0) -> Impermeabilidade (V = 0)
+    // ====================================================================
+    
+    // Vetor temporário para armazenar o novo valor do potencial na parede
+    // Evita poluição de dados (usar um phi já atualizado no cálculo do vizinho)
+    let mut phi_wall_new = vec![0.0; imax];
+
+    // O loop vai de 1 até imax-2. Os pontos 0 e imax-1 são o wake cut e 
+    // serão tratados a seguir pela condição de periodicidade.
+    for i in 1..imax-1 {
+        // Derivada tangencial (xi) ao longo da parede usando diferença central
+        let phi_xi = 0.5 * (domain[[i + 1, 0]].flow_ij.phi - domain[[i - 1, 0]].flow_ij.phi);
+        
+        // Obtenção das métricas na parede. 
+        // Assumindo que as métricas da face j+1/2 (ijp12) avaliadas em j=0 
+        // representam bem o contorno. Se tiver métricas calculadas estritamente
+        // nos nós inteiros (metrics_ij), utilize-as.
+        let a2 = domain[[i, 0]].metrics_ijp12.A2; 
+        let a3 = domain[[i, 0]].metrics_ijp12.A3;
+        
+        // Aplicação da equação deduzida: phi_eta = -(A2/A3) * phi_xi
+        phi_wall_new[i] = domain[[i, 1]].flow_ij.phi + (a2 / a3) * phi_xi;
+    }
+
+    // Atualização efetiva do domínio
+    for i in 1..imax-1 {
+        domain[[i, 0]].flow_ij.phi = phi_wall_new[i];
+    }
+
+    // ====================================================================
+    // 2. Condição de Periodicidade no "Wake Cut" (i = 0 e i = imax-1)
+    // ====================================================================
+    for j in 0..jmax {
+        let avg_phi = 0.5 * (domain[[0, j]].flow_ij.phi + domain[[imax - 1, j]].flow_ij.phi);
+        domain[[0, j]].flow_ij.phi = avg_phi;
+        domain[[imax - 1, j]].flow_ij.phi = avg_phi;
+    }
+
+    // ====================================================================
+    // 3. Condição de Farfield (j = jmax - 1)
+    // ====================================================================
+    for i in 0..imax {
+        let x = grid.points[[i, jmax - 1]].x;
+        // let y = grid.points[[i, jmax - 1]].y; // Descomente caso o ângulo de ataque seja != 0
+        
+        // Assumindo alfa = 0 (Escoamento livre alinhado com o eixo X)
+        domain[[i, jmax - 1]].flow_ij.phi = x; 
+    }
+
 }

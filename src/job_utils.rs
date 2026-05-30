@@ -35,8 +35,10 @@ pub fn read_config(filename: &str) -> config::Config {
         .expect(&format!("Could not read the {} file. Please make sure it exists and is in the correct path.\n", filename));
 
     // 2. Deserialize using the 'toml' crate
-    let config: config::Config = toml::from_str(&config_content)
+    let mut config: config::Config = toml::from_str(&config_content)
         .expect("Error parsing the configuration file. Please check the format and values.\n");
+
+    config.compute_derived_variables();
 
     // Display job startup information
     println!("\n
@@ -45,6 +47,7 @@ pub fn read_config(filename: &str) -> config::Config {
             +-----------------------------+\n", config.jobname);
 
     println!("Configuration loaded: \n{:#?}\n", config);
+
 
     config
 }

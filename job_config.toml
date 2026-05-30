@@ -8,9 +8,9 @@ meshname = "naca0012_mesh.vtk"
 
 jobname = "naca0012_M080"
 
-u_inf = 10.0
+Mach_inf = 0.3
 
-max_iterations = 1000
+max_iterations = 10
 
 gamma = 1.4
 
