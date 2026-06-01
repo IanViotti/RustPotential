@@ -1,4 +1,4 @@
-use ndarray::Array2;
+use ndarray::{Array2, iter};
 
 use crate::config;
 use crate::job_utils::Grid;
@@ -20,6 +20,8 @@ pub fn solve(grid: &Grid, config: &config::Config) -> Array2<solver_utils::Point
 
     // 3. Enter the main iterative solver loop (AF2 scheme).
     main_solver_loop(config, grid, &mut domain);
+
+    solver_utils::calculate_field(config, grid, &mut domain);
     
     println!("Solver completed for mesh: {}", config.meshname);
     
@@ -34,8 +36,8 @@ fn main_solver_loop(
 ) {
     // Sequência ótima do parâmetro alpha de Holst para acelerar convergência
     let alphas = [0.2, 0.8, 3.0, 10.0, 30.0]; 
-    let omega = 0.5; // Fator de relaxação
-    let laplace_warmup_iters = 20; // Primeiras 100 iterações são incompressíveis
+    let omega = 0.3; // Fator de relaxação
+    let laplace_warmup_iters = 50; // Primeiras iterações são incompressíveis
 
     for iteration in 0..config.max_iterations {
         let alpha = alphas[iteration % alphas.len()]; // Cicla os alphas
@@ -47,17 +49,14 @@ fn main_solver_loop(
         let mut residual = Array2::<f64>::zeros((grid.imax, grid.jmax));
         
         for i in 1..grid.imax-1 {
-            for j in 1..grid.jmax-1 {
+            for j in 0..grid.jmax-1 {
                 let res = calc_L_phi_ij(config, grid, domain, i, j);
+                if i == 1 && j == 0 {
+                    //println!("Initial Residual at (i=1, j=0): {:.2e}", res);
+                }
                 residual[[i, j]] = res;
                 if res.abs() > max_res { max_res = res.abs(); }
             }
-        }
-
-        println!("Iteration: {} | Max Residual: {:.2e}", iteration, max_res);
-        if max_res < 1E-6 {
-            println!("Converged!");
-            break;
         }
 
         // Matrizes intermediárias para o AF2
@@ -77,7 +76,7 @@ fn main_solver_loop(
         // =========================================================
         // Passo 2 (AF2): Varredura em Xi (i) - Azimutal (Malha O)
         // =========================================================
-        for j in 1..grid.jmax-1 {
+        for j in 0..grid.jmax-1 {
             // Extrair coeficientes A, B, C e rhs (f_inter) do anel 'j'
             // ATENÇÃO: Aqui DEVE ser usado o Solver Tridiagonal Periódico (Cíclico)
             // Salvar o resultado final em delta_phi[[i, j]]
@@ -88,7 +87,7 @@ fn main_solver_loop(
         // Atualização do Potencial Phi
         // =========================================================
         for i in 1..grid.imax {
-            for j in 1..grid.jmax-1 {
+            for j in 0..grid.jmax-1 {
                 domain[[i, j]].flow_ij.phi += delta_phi[[i, j]];
             }
         }
@@ -109,6 +108,15 @@ fn main_solver_loop(
                 }
             }
         }
+
+        if iteration % 100 == 0{
+            println!("Iteration: {}/{} | Max Residual: {:.2e}", iteration, config.max_iterations, max_res);
+        }
+        
+        if max_res < 1E-6 {
+            println!("Converged!");
+            break;
+        }
         
     }   
 }
@@ -117,14 +125,25 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
 
     let gamma = config.gamma;
 
+    // Mapeamento topológico da Malha O (Nós)
+    // Evita panic (out of bounds) e garante periodicidade
+    let i_plus = if i == grid.imax - 1 { 1 } else { i + 1 };
+    let i_minus = if i == 1 { grid.imax - 1 } else { i - 1 };
+
     // =========================================================
     // === Parameters for ip12j (Face na direção Xi) ===
     // =========================================================
-    let phi_xi_ip12j = domain[[i+1, j]].flow_ij.phi - domain[[i, j]].flow_ij.phi; 
-    let phi_eta_ip12_j = 0.5 * (
-        0.5 * (domain[[i, j+1]].flow_ij.phi - domain[[i, j-1]].flow_ij.phi) +
-        0.5 * (domain[[i+1, j+1]].flow_ij.phi - domain[[i+1, j-1]].flow_ij.phi)
-    );
+    let phi_xi_ip12j = domain[[i_plus, j]].flow_ij.phi - domain[[i, j]].flow_ij.phi; 
+    let phi_eta_ip12_j = if j == 0 {
+        let a2 = domain[[i, 0]].metrics_ip12j.A2;
+        let a3 = domain[[i, 0]].metrics_ip12j.A3;
+        -(a2 / a3) * phi_xi_ip12j
+    } else {
+        0.5 * (
+            0.5 * (domain[[i, j+1]].flow_ij.phi - domain[[i, j-1]].flow_ij.phi) +
+            0.5 * (domain[[i_plus, j+1]].flow_ij.phi - domain[[i_plus, j-1]].flow_ij.phi)
+        )
+    };
 
     domain[[i, j]].flow_ip12j.U = 
         domain[[i, j]].metrics_ip12j.A1 * phi_xi_ip12j + 
@@ -134,7 +153,6 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
         domain[[i, j]].metrics_ip12j.A2 * phi_xi_ip12j + 
         domain[[i, j]].metrics_ip12j.A3 * phi_eta_ip12_j;
 
-    // CORREÇÃO 1: Proteção termodinâmica (evita base negativa)
     let q2_ip12j = domain[[i, j]].flow_ip12j.U * phi_xi_ip12j + domain[[i, j]].flow_ip12j.V * phi_eta_ip12_j;
     let base_ip12j = 1.0 - ((gamma - 1.0) / (gamma + 1.0)) * q2_ip12j;
     domain[[i, j]].flow_ip12j.rho = base_ip12j.max(1e-5).powf(1.0 / (gamma - 1.0));
@@ -144,8 +162,8 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
     // =========================================================
     let phi_eta_ijp12 = domain[[i, j+1]].flow_ij.phi - domain[[i, j]].flow_ij.phi;
     let phi_xi_ijp12 = 0.5 * (
-        0.5 * (domain[[i+1, j]].flow_ij.phi - domain[[i-1, j]].flow_ij.phi) +
-        0.5 * (domain[[i+1, j+1]].flow_ij.phi - domain[[i-1, j+1]].flow_ij.phi)
+        0.5 * (domain[[i_plus, j]].flow_ij.phi - domain[[i_minus, j]].flow_ij.phi) +
+        0.5 * (domain[[i_plus, j+1]].flow_ij.phi - domain[[i_minus, j+1]].flow_ij.phi)
     );
 
     domain[[i, j]].flow_ijp12.U = 
@@ -156,7 +174,6 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
         domain[[i, j]].metrics_ijp12.A2 * phi_xi_ijp12 + 
         domain[[i, j]].metrics_ijp12.A3 * phi_eta_ijp12;
 
-    // CORREÇÃO 2: Proteção termodinâmica (evita base negativa)
     let q2_ijp12 = domain[[i, j]].flow_ijp12.U * phi_xi_ijp12 + domain[[i, j]].flow_ijp12.V * phi_eta_ijp12;
     let base_ijp12 = 1.0 - ((gamma - 1.0) / (gamma + 1.0)) * q2_ijp12;
     domain[[i, j]].flow_ijp12.rho = base_ijp12.max(1e-5).powf(1.0 / (gamma - 1.0));
@@ -164,12 +181,24 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
     // =========================================================
     // === Integer Point Rho (Média das 4 faces) ===
     // =========================================================
+    let rho_bottom = if j == 0 {
+        domain[[i, 0]].flow_ijp12.rho 
+    } else {
+        domain[[i, j-1]].flow_ijp12.rho
+    };
     
+    // Mapeamento topológico da face esquerda (i-1/2)
+    let rho_left = if i == 1 {
+        domain[[grid.imax - 1, j]].flow_ip12j.rho
+    } else {
+        domain[[i-1, j]].flow_ip12j.rho
+    };
+
     domain[[i, j]].flow_ij.rho = 0.25 * (
         domain[[i, j]].flow_ip12j.rho + 
-        domain[[i-1, j]].flow_ip12j.rho + 
+        rho_left + 
         domain[[i, j]].flow_ijp12.rho + 
-        domain[[i, j-1]].flow_ijp12.rho
+        rho_bottom
     );
 
     // Transition function
@@ -185,7 +214,7 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
         transition_funcion_ip12j = (C1 - domain[[i,j]].flow_ij.rho) * C2 * C;
         v_ip12j = 0.0_f64.max(transition_funcion_ip12j);
     } else {
-        transition_funcion_ip12j = (C1 - domain[[i+1,j]].flow_ij.rho) * C2 * C;
+        transition_funcion_ip12j = (C1 - domain[[i_plus,j]].flow_ij.rho) * C2 * C;
         v_ip12j = 0.0_f64.max(transition_funcion_ip12j);
     }
 
@@ -198,32 +227,46 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
     }
 
     // Upwind direction for artificial density
-    let r: i32;
-    let s: i32;
+    let r: i32 = if domain[[i, j]].flow_ip12j.U >= 0.0 { -1 } else { 1 };
+    let s: i32 = if domain[[i, j]].flow_ijp12.V >= 0.0 { -1 } else { 1 };
 
-    if domain[[i, j]].flow_ip12j.U >= 0.0 {
-        r = -1;
+    let j_upwind = if j == 0 && s == -1 {
+        0 
     } else {
-        r = 1;
-    }
+        (j as i32 + s) as usize
+    };
 
-    if domain[[i, j]].flow_ijp12.V >= 0.0 {
-        s = -1;
-    } else {
-        s = 1;
+    // Mapeamento topológico da face Upwind (i+r)
+    let mut i_upwind = i as i32 + r;
+    if i_upwind == grid.imax as i32 {
+        i_upwind = 1; // Face imax+1/2 é fisicamente idêntica à Face 1+1/2
+    } else if i_upwind == 0 {
+        i_upwind = (grid.imax - 1) as i32; // Face 0+1/2 é fisicamente idêntica à Face (imax-1)+1/2
     }
+    let i_upwind_mapped = i_upwind as usize;
 
     // Artificial Density Coefficients
-    domain[[i,j]].flow_ip12j.rho_art = (1.0 - v_ip12j) * domain[[i, j]].flow_ip12j.rho + v_ip12j * domain[[(i as i32 + r) as usize, j]].flow_ip12j.rho;
-    domain[[i,j]].flow_ijp12.rho_art = (1.0 - v_ijp12) * domain[[i, j]].flow_ijp12.rho + v_ijp12 * domain[[i, (j as i32 + s) as usize]].flow_ijp12.rho;
+    domain[[i,j]].flow_ip12j.rho_art = (1.0 - v_ip12j) * domain[[i, j]].flow_ip12j.rho + v_ip12j * domain[[i_upwind_mapped, j]].flow_ip12j.rho;
+    domain[[i,j]].flow_ijp12.rho_art = (1.0 - v_ijp12) * domain[[i, j]].flow_ijp12.rho + v_ijp12 * domain[[i, j_upwind]].flow_ijp12.rho;
+
+    // Mapeamento topológico dos Fluxos para garantir a Conservação da Massa
+    let flux_eta_minus = if j == 0 {
+        0.0 
+    } else {
+        domain[[i,j-1]].flow_ijp12.rho_art * domain[[i,j-1]].flow_ijp12.V / domain[[i,j-1]].metrics_ijp12.J
+    };
+
+    let flux_xi_minus = if i == 1 {
+        domain[[grid.imax - 1, j]].flow_ip12j.rho_art * domain[[grid.imax - 1, j]].flow_ip12j.U / domain[[grid.imax - 1, j]].metrics_ip12j.J
+    } else {
+        domain[[i-1, j]].flow_ip12j.rho_art * domain[[i-1, j]].flow_ip12j.U / domain[[i-1, j]].metrics_ip12j.J
+    };
+
+    let flux_xi_plus = domain[[i,j]].flow_ip12j.rho_art * domain[[i,j]].flow_ip12j.U / domain[[i,j]].metrics_ip12j.J;
+    let flux_eta_plus = domain[[i,j]].flow_ijp12.rho_art * domain[[i,j]].flow_ijp12.V / domain[[i,j]].metrics_ijp12.J;
 
     // Residual operator
-    let L_phi_ij = ((domain[[i,j]].flow_ip12j.rho_art * domain[[i,j]].flow_ip12j.U / domain[[i,j]].metrics_ip12j.J) - 
-                    (domain[[i-1,j]].flow_ip12j.rho_art * domain[[i-1,j]].flow_ip12j.U / domain[[i-1,j]].metrics_ip12j.J)) + 
-                    ((domain[[i,j]].flow_ijp12.rho_art * domain[[i,j]].flow_ijp12.V / domain[[i,j]].metrics_ijp12.J) - 
-                    (domain[[i,j-1]].flow_ijp12.rho_art * domain[[i,j-1]].flow_ijp12.V / domain[[i,j-1]].metrics_ijp12.J));
-
-    //println!("i: {}, j: {}, L_phi_ij: {:.2e}", i, j, L_phi_ij);
+    let L_phi_ij = (flux_xi_plus - flux_xi_minus) + (flux_eta_plus - flux_eta_minus);
     
     return L_phi_ij;
 }
@@ -232,43 +275,17 @@ pub fn enforce_boundary_conditions(grid: &Grid, domain: &mut Array2<solver_utils
     let imax = grid.imax;
     let jmax = grid.jmax;
 
-    // ====================================================================
-    // 1. Condição na Parede do Perfil (j = 0) -> Impermeabilidade (V = 0)
-    // ====================================================================
-    
-    // Vetor temporário para armazenar o novo valor do potencial na parede
-    // Evita poluição de dados (usar um phi já atualizado no cálculo do vizinho)
-    let mut phi_wall_new = vec![0.0; imax];
-
-    // O loop vai de 1 até imax-2. Os pontos 0 e imax-1 são o wake cut e 
-    // serão tratados a seguir pela condição de periodicidade.
-    for i in 1..imax-1 {
-        // Derivada tangencial (xi) ao longo da parede usando diferença central
-        let phi_xi = 0.5 * (domain[[i + 1, 0]].flow_ij.phi - domain[[i - 1, 0]].flow_ij.phi);
-        
-        // Obtenção das métricas na parede. 
-        // Assumindo que as métricas da face j+1/2 (ijp12) avaliadas em j=0 
-        // representam bem o contorno. Se tiver métricas calculadas estritamente
-        // nos nós inteiros (metrics_ij), utilize-as.
-        let a2 = domain[[i, 0]].metrics_ijp12.A2; 
-        let a3 = domain[[i, 0]].metrics_ijp12.A3;
-        
-        // Aplicação da equação deduzida: phi_eta = -(A2/A3) * phi_xi
-        phi_wall_new[i] = domain[[i, 1]].flow_ij.phi + (a2 / a3) * phi_xi;
-    }
-
-    // Atualização efetiva do domínio
-    for i in 1..imax-1 {
-        domain[[i, 0]].flow_ij.phi = phi_wall_new[i];
-    }
 
     // ====================================================================
     // 2. Condição de Periodicidade no "Wake Cut" (i = 0 e i = imax-1)
     // ====================================================================
     for j in 0..jmax {
-        let avg_phi = 0.5 * (domain[[0, j]].flow_ij.phi + domain[[imax - 1, j]].flow_ij.phi);
-        domain[[0, j]].flow_ij.phi = avg_phi;
-        domain[[imax - 1, j]].flow_ij.phi = avg_phi;
+        // Copia os dados do nó inteiro
+        domain[[0, j]].flow_ij = domain[[imax - 1, j]].flow_ij.clone();
+        
+        // Copia os dados das faces (meio-pontos) para manter a integridade total
+        domain[[0, j]].flow_ip12j = domain[[imax - 1, j]].flow_ip12j.clone();
+        domain[[0, j]].flow_ijp12 = domain[[imax - 1, j]].flow_ijp12.clone();
     }
 
     // ====================================================================

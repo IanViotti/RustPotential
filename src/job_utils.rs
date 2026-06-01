@@ -111,10 +111,10 @@ pub fn read_vtk_structured_grid(filepath: &str) -> Grid {
     }
 }
 
-/// Exports the computational mesh and the computed scalar/vector fields to a Legacy VTK file.
-/// Triggers a panic in case of an IO error.
-pub fn export_vtk_fields(filepath: &str, grid: &Grid, domain: &Array2<solver_utils::PointData>) {
-    let file = File::create(filepath).expect(&format!("Failed to create VTK output file: {}", filepath));
+
+pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<solver_utils::PointData>) {
+    let file_path = &format!("job_files/{}/solution.vtk", config.jobname);
+    let file = File::create(file_path).expect(&format!("Failed to create VTK output file: {}", config.jobname));
     let mut writer = BufWriter::new(file);
 
     // Internal closure to use the '?' operator without dirtying the main function signature
@@ -177,11 +177,52 @@ pub fn export_vtk_fields(filepath: &str, grid: &Grid, domain: &Array2<solver_uti
             }
         }
 
+        // =========================================================
+        // 4. Métricas Geométricas Opcionais
+        // =========================================================
+        if config.export_metrics {
+            // --- Scalar Field: Jacobian (J) ---
+            writeln!(writer, "SCALARS Jacobian float 1")?;
+            writeln!(writer, "LOOKUP_TABLE default")?;
+            for j in 0..jmax {
+                for i in 0..imax {
+                    writeln!(writer, "{:.8}", domain[[i, j]].metrics_ij.J)?;
+                }
+            }
+
+            // --- Scalar Field: Metric A1 ---
+            writeln!(writer, "SCALARS Metric_A1 float 1")?;
+            writeln!(writer, "LOOKUP_TABLE default")?;
+            for j in 0..jmax {
+                for i in 0..imax {
+                    writeln!(writer, "{:.8}", domain[[i, j]].metrics_ij.A1)?;
+                }
+            }
+
+            // --- Scalar Field: Metric A2 ---
+            writeln!(writer, "SCALARS Metric_A2 float 1")?;
+            writeln!(writer, "LOOKUP_TABLE default")?;
+            for j in 0..jmax {
+                for i in 0..imax {
+                    writeln!(writer, "{:.8}", domain[[i, j]].metrics_ij.A2)?;
+                }
+            }
+
+            // --- Scalar Field: Metric A3 ---
+            writeln!(writer, "SCALARS Metric_A3 float 1")?;
+            writeln!(writer, "LOOKUP_TABLE default")?;
+            for j in 0..jmax {
+                for i in 0..imax {
+                    writeln!(writer, "{:.8}", domain[[i, j]].metrics_ij.A3)?;
+                }
+            }
+        }
+
         Ok(())
     };
 
     // Execute the write operation and handle potential errors cleanly
     write_data().expect("Failed during data writing to VTK file");
 
-    println!("Results {} exported successfully", filepath);
+    println!("Results {} exported successfully", file_path);
 }

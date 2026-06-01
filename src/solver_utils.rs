@@ -102,139 +102,92 @@ pub fn initialize_domain(config: &config::Config, grid: &Grid) -> Array2<PointDa
         
     domain
 }
-
-/// Computes all geometric metrics using finite differences and stores them "in-place"
 pub fn calculate_metrics(grid: &Grid, domain: &mut Array2<PointData>) {
     println!("Calculating mesh metrics...");
 
-    // Loop over the internal points of the structured grid
-    for i in 1..grid.imax - 1 {
-        for j in 1..grid.jmax - 1 {
+    // Usamos a periodicidade total na direção Xi (i)
+    for j in 0..grid.jmax {
+        for i in 0..grid.imax - 1 {
+            
+            // Topologia O-grid: O salto periódico resolve a singularidade do bordo afiado
+            let i_plus = if i == grid.imax - 2 { 0 } else { i + 1 };
+            let i_minus = if i == 0 { grid.imax - 2 } else { i - 1 };
 
-            // ----------------------------------------------------
-            // 1. Metrics at the Integer Point: (i, j)
-            // Evaluated using 2nd order central differences
-            // ----------------------------------------------------
-            let x_xi = (grid.points[[i+1, j]].x - grid.points[[i-1, j]].x) / 2.0; 
-            let y_xi = (grid.points[[i+1, j]].y - grid.points[[i-1, j]].y) / 2.0; 
-            let x_eta = (grid.points[[i, j+1]].x - grid.points[[i, j-1]].x) / 2.0; 
-            let y_eta = (grid.points[[i, j+1]].y - grid.points[[i, j-1]].y) / 2.0; 
+            // 1. Direção Xi (Sempre central para cruzar a esteira ortogonalmente)
+            let x_xi = (grid.points[[i_plus, j]].x - grid.points[[i_minus, j]].x) / 2.0;
+            let y_xi = (grid.points[[i_plus, j]].y - grid.points[[i_minus, j]].y) / 2.0;
 
-            // Inverse transformation Jacobian at (i, j)
+            // 2. Direção Eta (Diferença lateral exigida apenas na parede e no farfield)
+            let (x_eta, y_eta) = if j == 0 {
+                (grid.points[[i, 1]].x - grid.points[[i, 0]].x, 
+                 grid.points[[i, 1]].y - grid.points[[i, 0]].y)
+            } else if j == grid.jmax - 1 {
+                (grid.points[[i, j]].x - grid.points[[i, j - 1]].x, 
+                 grid.points[[i, j]].y - grid.points[[i, j - 1]].y)
+            } else {
+                ((grid.points[[i, j + 1]].x - grid.points[[i, j - 1]].x) / 2.0, 
+                 (grid.points[[i, j + 1]].y - grid.points[[i, j - 1]].y) / 2.0)
+            };
+
             let J_ij = 1.0 / (x_xi * y_eta - x_eta * y_xi);
-
-            let xi_x = J_ij * y_eta;
-            let xi_y = -J_ij * x_eta;
-            let eta_x = -J_ij * y_xi;
-            let eta_y = J_ij * x_xi;
-
             domain[[i, j]].metrics_ij = Metrics {
                 J: J_ij,
-                A1: xi_x.powi(2) + xi_y.powi(2),
-                A2: xi_x * eta_x + xi_y * eta_y,
-                A3: eta_x.powi(2) + eta_y.powi(2),
+                A1: (J_ij * y_eta).powi(2) + (-J_ij * x_eta).powi(2),
+                A2: (J_ij * y_eta) * (-J_ij * y_xi) + (-J_ij * x_eta) * (J_ij * x_xi),
+                A3: (-J_ij * y_xi).powi(2) + (J_ij * x_xi).powi(2),
             };
 
             // ----------------------------------------------------
-            // 2. Metrics at the Xi Half-Point: (i + 1/2, j)
-            // Xi derivatives are exact (compact); Eta derivatives are averaged central
+            // Faces (Meio-Pontos)
             // ----------------------------------------------------
-            let x_xi_ip12 = grid.points[[i+1, j]].x - grid.points[[i, j]].x; 
-            let y_xi_ip12 = grid.points[[i+1, j]].y - grid.points[[i, j]].y; 
-            
-            let x_eta_ip12 = 0.5 * ((grid.points[[i+1, j+1]].x - grid.points[[i+1, j-1]].x) / 2.0 + 
-                                    (grid.points[[i, j+1]].x - grid.points[[i, j-1]].x) / 2.0); 
-            let y_eta_ip12 = 0.5 * ((grid.points[[i+1, j+1]].y - grid.points[[i+1, j-1]].y) / 2.0 + 
-                                    (grid.points[[i, j+1]].y - grid.points[[i, j-1]].y) / 2.0); 
+            let x_xi_ip12 = grid.points[[i_plus, j]].x - grid.points[[i, j]].x;
+            let y_xi_ip12 = grid.points[[i_plus, j]].y - grid.points[[i, j]].y;
+
+            let (x_eta_ip12, y_eta_ip12) = if j == 0 {
+                (0.5 * ((grid.points[[i_plus, 1]].x - grid.points[[i_plus, 0]].x) + (grid.points[[i, 1]].x - grid.points[[i, 0]].x)),
+                 0.5 * ((grid.points[[i_plus, 1]].y - grid.points[[i_plus, 0]].y) + (grid.points[[i, 1]].y - grid.points[[i, 0]].y)))
+            } else if j == grid.jmax - 1 {
+                (0.5 * ((grid.points[[i_plus, j]].x - grid.points[[i_plus, j-1]].x) + (grid.points[[i, j]].x - grid.points[[i, j-1]].x)),
+                 0.5 * ((grid.points[[i_plus, j]].y - grid.points[[i_plus, j-1]].y) + (grid.points[[i, j]].y - grid.points[[i, j-1]].y)))
+            } else {
+                (0.5 * ((grid.points[[i_plus, j+1]].x - grid.points[[i_plus, j-1]].x)/2.0 + (grid.points[[i, j+1]].x - grid.points[[i, j-1]].x)/2.0),
+                 0.5 * ((grid.points[[i_plus, j+1]].y - grid.points[[i_plus, j-1]].y)/2.0 + (grid.points[[i, j+1]].y - grid.points[[i, j-1]].y)/2.0))
+            };
 
             let J_ip12 = 1.0 / (x_xi_ip12 * y_eta_ip12 - x_eta_ip12 * y_xi_ip12);
-
-            let xi_x_ip12 = J_ip12 * y_eta_ip12;
-            let xi_y_ip12 = -J_ip12 * x_eta_ip12;
-            let eta_x_ip12 = -J_ip12 * y_xi_ip12;
-            let eta_y_ip12 = J_ip12 * x_xi_ip12;
-
             domain[[i, j]].metrics_ip12j = Metrics {
                 J: J_ip12,
-                A1: xi_x_ip12.powi(2) + xi_y_ip12.powi(2),
-                A2: xi_x_ip12 * eta_x_ip12 + xi_y_ip12 * eta_y_ip12,
-                A3: eta_x_ip12.powi(2) + eta_y_ip12.powi(2),
+                A1: (J_ip12 * y_eta_ip12).powi(2) + (-J_ip12 * x_eta_ip12).powi(2),
+                A2: (J_ip12 * y_eta_ip12) * (-J_ip12 * y_xi_ip12) + (-J_ip12 * x_eta_ip12) * (J_ip12 * x_xi_ip12),
+                A3: (-J_ip12 * y_xi_ip12).powi(2) + (J_ip12 * x_xi_ip12).powi(2),
             };
 
-            // ----------------------------------------------------
-            // 3. Metrics at the Eta Half-Point: (i, j + 1/2)
-            // Eta derivatives are exact (compact); Xi derivatives are averaged central
-            // ----------------------------------------------------
-            let x_xi_jp12 = 0.5 * ((grid.points[[i+1, j+1]].x - grid.points[[i-1, j+1]].x) / 2.0 + 
-                                   (grid.points[[i+1, j]].x - grid.points[[i-1, j]].x) / 2.0); 
-            let y_xi_jp12 = 0.5 * ((grid.points[[i+1, j+1]].y - grid.points[[i-1, j+1]].y) / 2.0 + 
-                                   (grid.points[[i+1, j]].y - grid.points[[i-1, j]].y) / 2.0); 
-            
-            let x_eta_jp12 = grid.points[[i, j+1]].x - grid.points[[i, j]].x; 
-            let y_eta_jp12 = grid.points[[i, j+1]].y - grid.points[[i, j]].y; 
+            if j < grid.jmax - 1 {
+                let x_eta_jp12 = grid.points[[i, j+1]].x - grid.points[[i, j]].x;
+                let y_eta_jp12 = grid.points[[i, j+1]].y - grid.points[[i, j]].y;
 
-            let J_jp12 = 1.0 / (x_xi_jp12 * y_eta_jp12 - x_eta_jp12 * y_xi_jp12);
+                let x_xi_jp12 = 0.5 * ((grid.points[[i_plus, j+1]].x - grid.points[[i_minus, j+1]].x)/2.0 + (grid.points[[i_plus, j]].x - grid.points[[i_minus, j]].x)/2.0);
+                let y_xi_jp12 = 0.5 * ((grid.points[[i_plus, j+1]].y - grid.points[[i_minus, j+1]].y)/2.0 + (grid.points[[i_plus, j]].y - grid.points[[i_minus, j]].y)/2.0);
 
-            let xi_x_jp12 = J_jp12 * y_eta_jp12;
-            let xi_y_jp12 = -J_jp12 * x_eta_jp12;
-            let eta_x_jp12 = -J_jp12 * y_xi_jp12;
-            let eta_y_jp12 = J_jp12 * x_xi_jp12;
-
-            domain[[i, j]].metrics_ijp12 = Metrics {
-                J: J_jp12,
-                A1: xi_x_jp12.powi(2) + xi_y_jp12.powi(2),
-                A2: xi_x_jp12 * eta_x_jp12 + xi_y_jp12 * eta_y_jp12,
-                A3: eta_x_jp12.powi(2) + eta_y_jp12.powi(2),
-            };
+                let J_jp12 = 1.0 / (x_xi_jp12 * y_eta_jp12 - x_eta_jp12 * y_xi_jp12);
+                domain[[i, j]].metrics_ijp12 = Metrics {
+                    J: J_jp12,
+                    A1: (J_jp12 * y_eta_jp12).powi(2) + (-J_jp12 * x_eta_jp12).powi(2),
+                    A2: (J_jp12 * y_eta_jp12) * (-J_jp12 * y_xi_jp12) + (-J_jp12 * x_eta_jp12) * (J_jp12 * x_xi_jp12),
+                    A3: (-J_jp12 * y_xi_jp12).powi(2) + (J_jp12 * x_xi_jp12).powi(2),
+                };
+            }
         }
     }
 
-    // ====================================================================
-    // Tratamento de Fronteira: Métricas na Parede do Perfil (j = 0)
-    // ====================================================================
-    for i in 1..grid.imax - 1 {
-        // 1. Métricas na face j+1/2 (ijp12) avaliadas em j=0
-        // A derivada em eta é exata (compacta) e usa apenas j=1 e j=0.
-        let x_eta_jp12 = grid.points[[i, 1]].x - grid.points[[i, 0]].x; 
-        let y_eta_jp12 = grid.points[[i, 1]].y - grid.points[[i, 0]].y; 
-        
-        // A derivada em xi na face j+1/2 é a média das diferenças em j=1 e j=0
-        let x_xi_jp12 = 0.5 * ((grid.points[[i+1, 1]].x - grid.points[[i-1, 1]].x) / 2.0 + 
-                               (grid.points[[i+1, 0]].x - grid.points[[i-1, 0]].x) / 2.0); 
-        let y_xi_jp12 = 0.5 * ((grid.points[[i+1, 1]].y - grid.points[[i-1, 1]].y) / 2.0 + 
-                               (grid.points[[i+1, 0]].y - grid.points[[i-1, 0]].y) / 2.0); 
-
-        // Jacobiano e métricas contravariantes para a face da parede
-        let J_jp12 = 1.0 / (x_xi_jp12 * y_eta_jp12 - x_eta_jp12 * y_xi_jp12);
-
-        let xi_x_jp12 = J_jp12 * y_eta_jp12;
-        let xi_y_jp12 = -J_jp12 * x_eta_jp12;
-        let eta_x_jp12 = -J_jp12 * y_xi_jp12;
-        let eta_y_jp12 = J_jp12 * x_xi_jp12;
-
-        domain[[i, 0]].metrics_ijp12 = Metrics {
-            J: J_jp12,
-            A1: xi_x_jp12.powi(2) + xi_y_jp12.powi(2),
-            A2: xi_x_jp12 * eta_x_jp12 + xi_y_jp12 * eta_y_jp12,
-            A3: eta_x_jp12.powi(2) + eta_y_jp12.powi(2),
-        };
-    }
-
-    // ====================================================================
-    // Tratamento de Fronteira: Periodicidade no Wake Cut (i = 0 e i = imax-1)
-    // ====================================================================
+    // Fechamento exato para o plot no VTK (O nó 0 dita o estado físico do imax-1)
     for j in 0..grid.jmax {
-        // Copia as métricas da face logo acima do bordo de fuga para o nó fantasma 0
-        domain[[0, j]].metrics_ip12j = domain[[grid.imax - 2, j]].metrics_ip12j.clone();
-        domain[[0, j]].metrics_ijp12 = domain[[grid.imax - 2, j]].metrics_ijp12.clone();
-        domain[[0, j]].metrics_ij    = domain[[grid.imax - 2, j]].metrics_ij.clone();
-
-        // Copia as métricas da face logo abaixo do bordo de fuga para o nó fantasma imax-1
-        domain[[grid.imax - 1, j]].metrics_ip12j = domain[[1, j]].metrics_ip12j.clone();
-        domain[[grid.imax - 1, j]].metrics_ijp12 = domain[[1, j]].metrics_ijp12.clone();
-        domain[[grid.imax - 1, j]].metrics_ij    = domain[[1, j]].metrics_ij.clone();
+        domain[[grid.imax - 1, j]].metrics_ij = domain[[0, j]].metrics_ij.clone();
+        domain[[grid.imax - 1, j]].metrics_ip12j = domain[[0, j]].metrics_ip12j.clone();
+        if j < grid.jmax - 1 {
+            domain[[grid.imax - 1, j]].metrics_ijp12 = domain[[0, j]].metrics_ijp12.clone();
+        }
     }
-
 }
 
 /// Resolve o 1º Passo do esquema AF2 na direção Eta (Radial) utilizando o Algoritmo de Thomas.
@@ -248,7 +201,7 @@ pub fn solve_tdma_eta(
     residual: &Array2<f64>,
     f_inter: &mut Array2<f64>,
 ) {
-    let j_start = 1;
+    let j_start = 0;
     let j_end = grid.jmax - 1;
     let n = grid.jmax;
 
@@ -270,10 +223,11 @@ pub fn solve_tdma_eta(
 
         // Coeficiente A_tilde em j-1/2 
         // Equivale a pegar o valor j+1/2 do nó anterior (j-1)
-        let a_tilde_minus = domain[[i, j - 1]].flow_ijp12.rho_art 
-                          * domain[[i, j - 1]].metrics_ijp12.A3 
-                          / domain[[i, j - 1]].metrics_ijp12.J;
-
+        let a_tilde_minus = if j == 0 {
+            0.0 // FÍSICA: Sem conectividade com o interior do perfil
+        } else {
+            domain[[i, j - 1]].flow_ijp12.rho_art * domain[[i, j - 1]].metrics_ijp12.A3 / domain[[i, j - 1]].metrics_ijp12.J
+        };
         // Montagem da linha da matriz tridiagonal
         a[j] = -a_tilde_minus;                            // Sub-diagonal
         b[j] = alpha + a_tilde_plus + a_tilde_minus;      // Diagonal principal
@@ -283,14 +237,6 @@ pub fn solve_tdma_eta(
         d[j] = alpha * omega * residual[[i, j]];
     }
 
-    // =========================================================================
-    // 2. Aplicação das Condições de Fronteira no Vetor Intermediário 'f'
-    // =========================================================================
-    // Na parede do perfil (j = 1), a condição de impermeabilidade (Neumann, dPhi/dEta = 0)
-    // reflete-se frequentemente no vetor f como f_0 = f_1.
-    // Isso significa que somamos o coeficiente 'a' ao coeficiente 'b' e anulamos 'a'.
-    b[1] += a[1];
-    a[1] = 0.0;
 
     // No Farfield (j = jmax - 2), normalmente a perturbação é nula (Dirichlet, f_jmax-1 = 0).
     // Anulamos o coeficiente que multiplicaria o ponto fora do domínio de cálculo.
@@ -363,17 +309,11 @@ pub fn solve_periodic_tdma_xi(
         let i = idx + 1; // Índice real na grelha do domínio (1 a imax-1)
         
         // Determinar o vizinho "anterior" respeitando a periodicidade
-        let i_minus = if i == 1 { n } else { i - 1 };
+        let ip: usize = if i == grid.imax - 1 { 0 } else { i };
+        let im = if i == 1 { 0 } else { i - 1 };
 
-        // Coeficiente B_tilde em i+1/2 
-        let b_tilde_plus = domain[[i, j]].flow_ip12j.rho_art 
-                         * domain[[i, j]].metrics_ip12j.A1 
-                         / domain[[i, j]].metrics_ip12j.J;
-
-        // Coeficiente B_tilde em i-1/2 (igual ao B_tilde_plus do nó anterior)
-        let b_tilde_minus = domain[[i_minus, j]].flow_ip12j.rho_art 
-                          * domain[[i_minus, j]].metrics_ip12j.A1 
-                          / domain[[i_minus, j]].metrics_ip12j.J;
+        let b_tilde_plus = domain[[ip, j]].flow_ip12j.rho_art * domain[[ip, j]].metrics_ip12j.A1 / domain[[ip, j]].metrics_ip12j.J;
+        let b_tilde_minus = domain[[im, j]].flow_ip12j.rho_art * domain[[im, j]].metrics_ip12j.A1 / domain[[im, j]].metrics_ip12j.J;
 
         // Preenchimento dos vetores da matriz
         a[idx] = -beta * b_tilde_minus;                      // Sub-diagonal
@@ -455,5 +395,125 @@ fn solve_standard_tdma(a: &[f64], b: &[f64], c: &[f64], d: &[f64], x: &mut [f64]
     x[n - 1] = d_prime[n - 1];
     for i in (0..n - 1).rev() {
         x[i] = d_prime[i] - c_prime[i] * x[i + 1];
+    }
+}
+
+
+pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2<PointData>) {
+    println!("Calculating final flow field variables...");
+    
+    let gamma = config.gamma;
+    let m_inf = config.Mach_inf;
+    let c_rho = (gamma - 1.0) / (gamma + 1.0); // Fator de normalização de Holst
+
+    // Calculamos apenas para o interior e a parede (i de 1 até imax-1, j de 0 até jmax-1)
+    for j in 0..grid.jmax - 1 {
+        for i in 1..grid.imax {
+            
+            // =========================================================
+            // 1. Mapeamento Topológico (Malha O)
+            // =========================================================
+            let i_plus = if i == grid.imax - 1 { 1 } else { i + 1 };
+            let i_minus = if i == 1 { grid.imax - 1 } else { i - 1 };
+
+            // =========================================================
+            // 2. Derivadas da Malha nos Nós Inteiros (i, j)
+            // =========================================================
+            let x_xi = (grid.points[[i_plus, j]].x - grid.points[[i_minus, j]].x) / 2.0;
+            let y_xi = (grid.points[[i_plus, j]].y - grid.points[[i_minus, j]].y) / 2.0;
+
+            let (x_eta, y_eta) = if j == 0 {
+                // Parede (j=0): Diferença avançada para não sair do domínio
+                (
+                    grid.points[[i, 1]].x - grid.points[[i, 0]].x,
+                    grid.points[[i, 1]].y - grid.points[[i, 0]].y
+                )
+            } else {
+                // Interior: Diferença central
+                (
+                    (grid.points[[i, j+1]].x - grid.points[[i, j-1]].x) / 2.0,
+                    (grid.points[[i, j+1]].y - grid.points[[i, j-1]].y) / 2.0
+                )
+            };
+
+            let j_inv = x_xi * y_eta - x_eta * y_xi;
+            let jacobian = 1.0 / j_inv;
+
+            let xi_x = jacobian * y_eta;
+            let xi_y = -jacobian * x_eta;
+            let eta_x = -jacobian * y_xi;
+            let eta_y = jacobian * x_xi;
+
+            // =========================================================
+            // 3. Derivadas do Potencial Sincronizadas
+            // =========================================================
+            let i_plus = if i == grid.imax - 1 { 1 } else { i + 1 };
+            let i_minus = if i == 0 { grid.imax - 2 } else { i - 1 };
+
+            // Derivada EXATAMENTE equivalente ao cálculo do x_xi nas métricas
+            let phi_xi = (domain[[i_plus, j]].flow_ij.phi - domain[[i_minus, j]].flow_ij.phi) / 2.0;
+
+            let phi_eta = if j == 0 {
+                // Tangência na parede. Adicionamos uma proteção para divisões delicadas
+                let a2_local = domain[[i, j]].metrics_ij.A2;
+                let a3_local = domain[[i, j]].metrics_ij.A3;
+                
+                if a3_local.abs() > 1e-12 {
+                    -(a2_local / a3_local) * phi_xi
+                } else {
+                    domain[[i, 1]].flow_ij.phi - domain[[i, 0]].flow_ij.phi
+                }
+            } else if j == grid.jmax - 1 {
+                domain[[i, j]].flow_ij.phi - domain[[i, j - 1]].flow_ij.phi
+            } else {
+                (domain[[i, j + 1]].flow_ij.phi - domain[[i, j - 1]].flow_ij.phi) / 2.0
+            };
+
+            // =========================================================
+            // 4. Velocidades Cartesianas
+            // =========================================================
+            let u = xi_x * phi_xi + eta_x * phi_eta;
+            let v = xi_y * phi_xi + eta_y * phi_eta;
+            let q2 = u * u + v * v;
+
+            // =========================================================
+            // 5. Termodinâmica (Sincronizada com o calc_L_phi_ij)
+            // =========================================================
+            // Na normalização de Holst baseada na velocidade crítica a*:
+            // a^2 = 1.0 - [(gamma-1)/(gamma+1)] * q^2
+            let a_squared = 1.0 - c_rho * q2;
+            let a_sq_safe = a_squared.max(1e-5); // Prevenção contra vácuo numérico
+            
+            let rho = a_sq_safe.powf(1.0 / (gamma - 1.0));
+            
+            // Mach number: M^2 = q^2 / a^2
+            let mach = (q2 / a_sq_safe).sqrt();
+
+            domain[[i, j]].flow_ij.u = u;
+            domain[[i, j]].flow_ij.v = v;
+            //domain[[i, j]].flow_ij.rho = rho;
+            domain[[i, j]].flow_ij.M = mach;
+        }
+    }
+
+    // =========================================================
+    // 6. Fechamento das Fronteiras Restantes para o Plot VTK
+    // =========================================================
+    for j in 0..grid.jmax {
+        // A. Espelhamento do Wake Cut (Nó fantasma i=0 recebe cópia de i=imax-1)
+        domain[[0, j]].flow_ij.u = domain[[grid.imax - 1, j]].flow_ij.u;
+        domain[[0, j]].flow_ij.v = domain[[grid.imax - 1, j]].flow_ij.v;
+        domain[[0, j]].flow_ij.rho = domain[[grid.imax - 1, j]].flow_ij.rho;
+        domain[[0, j]].flow_ij.M = domain[[grid.imax - 1, j]].flow_ij.M;
+
+        // B. Condição de Farfield (j = jmax - 1)
+        if j == grid.jmax - 1 {
+            for i in 0..grid.imax {
+                domain[[i, j]].flow_ij.u = 1.0;
+                domain[[i, j]].flow_ij.v = 0.0;
+                domain[[i, j]].flow_ij.rho = 1.0;
+                domain[[i, j]].flow_ij.M = m_inf;
+            }
+        }
     }
 }

@@ -4,13 +4,16 @@
 
 # jobname (used for directory and files creation)
 # This will be the name of the output folder inside 'job_files/'
-meshname = "naca0012_mesh.vtk"
 
-jobname = "naca0012_M080"
+meshname = "biconvex_mesh.vtk"
 
-Mach_inf = 0.3
+jobname = "biconvex"
 
-max_iterations = 10
+export_metrics = true
+
+Mach_inf = 0.7
+
+max_iterations = 50000
 
 gamma = 1.4
 

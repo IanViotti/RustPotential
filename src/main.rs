@@ -27,7 +27,7 @@ fn main() {
     let field = solver_core::solve(&grid, &config);
 
     // Export results to VTK file
-    job_utils::export_vtk_fields(&format!("job_files/{}/solution.vtk", config.jobname), &grid, &field);
+    job_utils::export_vtk_fields(&config, &grid, &field);
 
     // Print final completion message and elapsed execution time.
     println!("Job completed!");

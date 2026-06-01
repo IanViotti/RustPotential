@@ -11,6 +11,8 @@ pub struct Config {
 
     pub jobname: String,
 
+    pub export_metrics: bool,
+
     pub Mach_inf: f64,
 
     pub max_iterations: usize,
