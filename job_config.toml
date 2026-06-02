@@ -13,7 +13,7 @@ export_metrics = true
 
 Mach_inf = 0.7
 
-max_iterations = 50000
+max_iterations = 5000
 
 gamma = 1.4
 

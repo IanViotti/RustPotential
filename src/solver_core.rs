@@ -42,7 +42,7 @@ fn main_solver_loop(
     for iteration in 0..config.max_iterations {
         let alpha = alphas[iteration % alphas.len()]; // Cicla os alphas
 
-        enforce_boundary_conditions(grid, domain);
+        enforce_boundary_conditions(config, grid, domain);
         
         // 2. Calcular o campo de Resíduos L(phi)
         let mut max_res = 0.0;
@@ -271,7 +271,7 @@ fn calc_L_phi_ij(config: &config::Config, grid: &Grid, domain: &mut Array2<solve
     return L_phi_ij;
 }
 
-pub fn enforce_boundary_conditions(grid: &Grid, domain: &mut Array2<solver_utils::PointData>) {
+pub fn enforce_boundary_conditions(config: &config::Config, grid: &Grid, domain: &mut Array2<solver_utils::PointData>) {
     let imax = grid.imax;
     let jmax = grid.jmax;
 
@@ -296,7 +296,7 @@ pub fn enforce_boundary_conditions(grid: &Grid, domain: &mut Array2<solver_utils
         // let y = grid.points[[i, jmax - 1]].y; // Descomente caso o ângulo de ataque seja != 0
         
         // Assumindo alfa = 0 (Escoamento livre alinhado com o eixo X)
-        domain[[i, jmax - 1]].flow_ij.phi = x; 
+        domain[[i, jmax - 1]].flow_ij.phi = config.u_inf * x; 
     }
 
 }

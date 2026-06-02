@@ -74,10 +74,10 @@ pub fn initialize_domain(config: &config::Config, grid: &Grid) -> Array2<PointDa
         for j in 0..grid.jmax {
             domain[[i, j]].flow_ij = NodalFlow {
                 // Initialize velocity potential assuming uniform flow (0 deg angle of attack)
-                phi: 1.0 * grid.points[[i, j]].x, 
+                phi: config.u_inf * grid.points[[i, j]].x, 
                 M: config.Mach_inf,
                 rho: 1.0,
-                u: 1.0,
+                u: config.u_inf,
                 v: 0.0,
             };
 
@@ -491,7 +491,7 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
 
             domain[[i, j]].flow_ij.u = u;
             domain[[i, j]].flow_ij.v = v;
-            //domain[[i, j]].flow_ij.rho = rho;
+            domain[[i, j]].flow_ij.rho = rho;
             domain[[i, j]].flow_ij.M = mach;
         }
     }
