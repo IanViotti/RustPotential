@@ -11,9 +11,11 @@ jobname = "biconvex"
 
 export_metrics = true
 
-Mach_inf = 0.7
+Mach_inf = 1.1
 
-max_iterations = 5000
+max_iterations = 10000
+
+convergence_residual = 1E-6
 
 gamma = 1.4
 

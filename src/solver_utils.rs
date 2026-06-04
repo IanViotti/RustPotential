@@ -76,7 +76,7 @@ pub fn initialize_domain(config: &config::Config, grid: &Grid) -> Array2<PointDa
                 // Initialize velocity potential assuming uniform flow (0 deg angle of attack)
                 phi: config.u_inf * grid.points[[i, j]].x, 
                 M: config.Mach_inf,
-                rho: 1.0,
+                rho: config.rho_inf,
                 u: config.u_inf,
                 v: 0.0,
             };
@@ -85,16 +85,16 @@ pub fn initialize_domain(config: &config::Config, grid: &Grid) -> Array2<PointDa
                 // Initialize velocity potential assuming uniform flow (0 deg angle of attack)
                 U: 1.0,
                 V: 0.0,
-                rho: 1.0,
-                rho_art: 1.0
+                rho: config.rho_inf,
+                rho_art: config.rho_inf
             };
 
             domain[[i, j]].flow_ijp12 = HalfPointFlow {
                 // Initialize velocity potential assuming uniform flow (0 deg angle of attack)
                 U: 1.0,
                 V: 0.0,
-                rho: 1.0,
-                rho_art: 1.0
+                rho: config.rho_inf,
+                rho_art: config.rho_inf
             };
 
         }
@@ -107,10 +107,10 @@ pub fn calculate_metrics(grid: &Grid, domain: &mut Array2<PointData>) {
 
     // Usamos a periodicidade total na direção Xi (i)
     for j in 0..grid.jmax {
-        for i in 0..grid.imax - 1 {
+        for i in 0..grid.imax {
             
             // Topologia O-grid: O salto periódico resolve a singularidade do bordo afiado
-            let i_plus = if i == grid.imax - 2 { 0 } else { i + 1 };
+            let i_plus = if i == grid.imax - 1 { 1 } else { i + 1 };
             let i_minus = if i == 0 { grid.imax - 2 } else { i - 1 };
 
             // 1. Direção Xi (Sempre central para cruzar a esteira ortogonalmente)
@@ -136,6 +136,7 @@ pub fn calculate_metrics(grid: &Grid, domain: &mut Array2<PointData>) {
                 A2: (J_ij * y_eta) * (-J_ij * y_xi) + (-J_ij * x_eta) * (J_ij * x_xi),
                 A3: (-J_ij * y_xi).powi(2) + (J_ij * x_xi).powi(2),
             };
+
 
             // ----------------------------------------------------
             // Faces (Meio-Pontos)
@@ -482,12 +483,11 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
             // Na normalização de Holst baseada na velocidade crítica a*:
             // a^2 = 1.0 - [(gamma-1)/(gamma+1)] * q^2
             let a_squared = 1.0 - c_rho * q2;
-            let a_sq_safe = a_squared.max(1e-5); // Prevenção contra vácuo numérico
             
-            let rho = a_sq_safe.powf(1.0 / (gamma - 1.0));
+            let rho = a_squared.powf(1.0 / (gamma - 1.0));
             
             // Mach number: M^2 = q^2 / a^2
-            let mach = (q2 / a_sq_safe).sqrt();
+            let mach = (q2 / a_squared).sqrt();
 
             domain[[i, j]].flow_ij.u = u;
             domain[[i, j]].flow_ij.v = v;
@@ -509,9 +509,9 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
         // B. Condição de Farfield (j = jmax - 1)
         if j == grid.jmax - 1 {
             for i in 0..grid.imax {
-                domain[[i, j]].flow_ij.u = 1.0;
+                domain[[i, j]].flow_ij.u = config.u_inf;
                 domain[[i, j]].flow_ij.v = 0.0;
-                domain[[i, j]].flow_ij.rho = 1.0;
+                domain[[i, j]].flow_ij.rho = config.rho_inf;
                 domain[[i, j]].flow_ij.M = m_inf;
             }
         }

@@ -37,9 +37,8 @@ fn main_solver_loop(
     // Sequência ótima do parâmetro alpha de Holst para acelerar convergência
     let alphas = [0.2, 0.8, 3.0, 10.0, 30.0]; 
     let omega = 0.3; // Fator de relaxação
-    let laplace_warmup_iters = 50; // Primeiras iterações são incompressíveis
 
-    for iteration in 0..config.max_iterations {
+    for iteration in 1..config.max_iterations {
         let alpha = alphas[iteration % alphas.len()]; // Cicla os alphas
 
         enforce_boundary_conditions(config, grid, domain);
@@ -48,7 +47,8 @@ fn main_solver_loop(
         let mut max_res = 0.0;
         let mut residual = Array2::<f64>::zeros((grid.imax, grid.jmax));
         
-        for i in 1..grid.imax-1 {
+        // Calculate residuals in all points, except in outter boundary and i=0 (which is periodic with i=imax-1) 
+        for i in 1..grid.imax {
             for j in 0..grid.jmax-1 {
                 let res = calc_L_phi_ij(config, grid, domain, i, j);
                 if i == 1 && j == 0 {
@@ -92,28 +92,11 @@ fn main_solver_loop(
             }
         }
 
-
-        // =========================================================
-        // O AQUECIMENTO INCOMPRESSÍVEL (Laplace Warm-up)
-        // =========================================================
-        // Se estivermos na fase de aquecimento, nós sobrescrevemos o rho 
-        // recém-calculado no calc_L_phi_ij e forçamos ele a voltar para 1.0.
-        // Isso impede a formação de choques espúrios no início.
-        if iteration < laplace_warmup_iters {
-            for i in 0..grid.imax {
-                for j in 0..grid.jmax {
-                    domain[[i, j]].flow_ij.rho = 1.0;
-                    domain[[i, j]].flow_ip12j.rho = 1.0;
-                    domain[[i, j]].flow_ijp12.rho = 1.0;
-                }
-            }
-        }
-
-        if iteration % 100 == 0{
+        if iteration % 100 == 0 || iteration == config.max_iterations - 1  || iteration == 1{
             println!("Iteration: {}/{} | Max Residual: {:.2e}", iteration, config.max_iterations, max_res);
         }
         
-        if max_res < 1E-6 {
+        if max_res < config.convergence_residual {
             println!("Converged!");
             break;
         }
@@ -275,7 +258,6 @@ pub fn enforce_boundary_conditions(config: &config::Config, grid: &Grid, domain:
     let imax = grid.imax;
     let jmax = grid.jmax;
 
-
     // ====================================================================
     // 2. Condição de Periodicidade no "Wake Cut" (i = 0 e i = imax-1)
     // ====================================================================
@@ -297,6 +279,8 @@ pub fn enforce_boundary_conditions(config: &config::Config, grid: &Grid, domain:
         
         // Assumindo alfa = 0 (Escoamento livre alinhado com o eixo X)
         domain[[i, jmax - 1]].flow_ij.phi = config.u_inf * x; 
+        domain[[i, jmax - 1]].flow_ij.rho = config.rho_inf;
+
     }
 
 }
