@@ -5,15 +5,19 @@
 # jobname (used for directory and files creation)
 # This will be the name of the output folder inside 'job_files/'
 
-meshname = "biconvex_mesh.vtk"
+meshname = "biconvex_fine_mesh.vtk"
 
-jobname = "biconvex"
+jobname = "biconvex_fine"
 
 export_metrics = true
 
-Mach_inf = 1.1
+Mach_inf = 0.95
 
 max_iterations = 10000
+
+omega = 0.8
+
+M = 8
 
 convergence_residual = 1E-6
 

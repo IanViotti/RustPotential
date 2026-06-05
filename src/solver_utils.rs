@@ -517,3 +517,73 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
         }
     }
 }
+
+pub fn alpha_seq(config: &config::Config, grid: &Grid) -> Vec<f64> {
+
+    let min_spacing = compute_min_spacing(grid);
+
+    // Valores extremos de Alpha baseados na recomendação de Holst
+    let alpha_h = 1.0 / min_spacing;
+    let alpha_l = 1.0; // Pode ser reduzido para 0.1 dependendo da estabilidade
+    
+    // O tamanho da sequência M (Holst costumava usar entre 4 e 8).
+    // Se você não tiver isso no seu arquivo toml, 8 é um excelente padrão.
+    let m = config.M; // Idealmente: config.alpha_sequence_length
+    
+    let mut alpha_k = Vec::with_capacity(m);
+    
+    if m <= 1 {
+        alpha_k.push(alpha_h);
+        return alpha_k;
+    }
+
+    // Fator da progressão geométrica: ratio = (alpha_L / alpha_H)^(1 / (M - 1))
+    let ratio = (alpha_l / alpha_h).powf(1.0 / (m as f64 - 1.0));
+    
+    // Constrói a sequência de alfa_H (alto) até alfa_L (baixo)
+    for k in 0..m {
+        let alpha = alpha_h * ratio.powi(k as i32);
+        alpha_k.push(alpha);
+    }
+    
+    alpha_k
+}
+
+
+pub fn compute_min_spacing(grid: &Grid) -> f64 {
+    let mut min_spacing = f64::MAX;
+
+    // A parede do perfil está em j = 0
+    let j = 0;
+    
+    for i in 0..grid.imax {
+        // 1. Espaçamento Azimutal (Ao longo do perfil - Direção Xi)
+        // Usa a periodicidade para fechar o bordo de fuga (i = imax - 1 conecta com i = 1)
+        let i_plus = if i == grid.imax - 1 { 1 } else { i + 1 };
+        
+        let dx_xi = grid.points[[i_plus, j]].x - grid.points[[i, j]].x;
+        let dy_xi = grid.points[[i_plus, j]].y - grid.points[[i, j]].y;
+        let ds_xi = (dx_xi.powi(2) + dy_xi.powi(2)).sqrt();
+        
+        if ds_xi < min_spacing {
+            min_spacing = ds_xi;
+        }
+
+        // 2. Espaçamento Normal (Afastando da parede - Direção Eta)
+        // Checa a distância do nó na parede (j=0) para o seu vizinho imediato (j=1)
+        let dx_eta = grid.points[[i, 1]].x - grid.points[[i, 0]].x;
+        let dy_eta = grid.points[[i, 1]].y - grid.points[[i, 0]].y;
+        let ds_eta = (dx_eta.powi(2) + dy_eta.powi(2)).sqrt();
+        
+        if ds_eta < min_spacing {
+            min_spacing = ds_eta;
+        }
+    }
+    
+    // Prevenção de segurança para malhas degeneradas
+    if min_spacing < 1e-16 {
+        panic!("O espaçamento da malha é muito próximo de zero. Verifique o gerador de malha.");
+    }
+
+    min_spacing
+}

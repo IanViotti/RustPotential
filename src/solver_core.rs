@@ -35,8 +35,8 @@ fn main_solver_loop(
     domain: &mut Array2<solver_utils::PointData>
 ) {
     // Sequência ótima do parâmetro alpha de Holst para acelerar convergência
-    let alphas = [0.2, 0.8, 3.0, 10.0, 30.0]; 
-    let omega = 0.3; // Fator de relaxação
+    let alphas = solver_utils::alpha_seq(config, grid); 
+    let omega = config.omega; // Fator de relaxação
 
     for iteration in 1..config.max_iterations {
         let alpha = alphas[iteration % alphas.len()]; // Cicla os alphas
@@ -51,9 +51,6 @@ fn main_solver_loop(
         for i in 1..grid.imax {
             for j in 0..grid.jmax-1 {
                 let res = calc_L_phi_ij(config, grid, domain, i, j);
-                if i == 1 && j == 0 {
-                    //println!("Initial Residual at (i=1, j=0): {:.2e}", res);
-                }
                 residual[[i, j]] = res;
                 if res.abs() > max_res { max_res = res.abs(); }
             }
@@ -97,7 +94,7 @@ fn main_solver_loop(
         }
         
         if max_res < config.convergence_residual {
-            println!("Converged!");
+            println!("Converged at iteration {} with max residual {:.2e}", iteration, max_res);
             break;
         }
         

@@ -1,7 +1,8 @@
 #![allow(non_snake_case)]
 
+// Externam modules
 use std::time::Instant;
-use toml;
+use std::io;
 
 // Import internal modules
 mod config; 
@@ -34,4 +35,9 @@ fn main() {
     
     let duration = start.elapsed();
     println!("Total running time: {:?} \n", duration);
+
+    println!("Press Enter to finish...");
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read input.");
 }

@@ -21,6 +21,10 @@ pub struct Config {
 
     pub gamma: f64,
 
+    pub omega: f64,
+
+    pub M: usize,
+
     pub C: f64,
 
     #[serde(skip)]
