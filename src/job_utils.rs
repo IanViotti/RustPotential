@@ -1,5 +1,6 @@
 use crate::config;
 use crate::solver_utils;
+use crate::solver_utils::PointData;
 
 use std::fs;
 use std::fs::File;
@@ -225,4 +226,45 @@ pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<s
     write_data().expect("Failed during data writing to VTK file");
 
     println!("Results {} exported successfully", file_path);
+}
+
+
+pub fn export_cp_csv(config: &config::Config, grid: &Grid, domain: &Array2<PointData>) {
+    println!("Exportando distribuição de Cp para CSV...");
+
+    // Cria o nome do arquivo baseado no nome da malha/job
+    let filename = format!("job_files/{}/Cp_distribution.csv", config.jobname);
+    let mut file = File::create(&filename).expect("Falha ao criar o arquivo CSV");
+
+    // Cabeçalho do CSV. Exportar o 'y' é crucial na Malha O para separar o intradorso do extradorso na hora de plotar.
+    writeln!(file, "x,y,Cp").unwrap();
+
+    let gamma = config.gamma;
+    let m_inf = config.Mach_inf;
+    let c_rho = (gamma - 1.0) / (gamma + 1.0);
+
+    // 1. Reconstruir a densidade de freestream (rho_inf) usando a normalização exata de Holst
+    let u_inf_squared = ((gamma + 1.0) * m_inf.powi(2)) / (2.0 + (gamma - 1.0) * m_inf.powi(2));
+    let a2_inf = 1.0 - c_rho * u_inf_squared;
+    let rho_inf = a2_inf.max(1e-5).powf(1.0 / (gamma - 1.0));
+
+    // Multiplicador frontal da equação do Cp
+    let cp_multiplier = 2.0 / (gamma * m_inf.powi(2));
+
+    // 2. Varrer a parede do aerofólio (j = 0)
+    // O loop vai de 0 a imax-1 para dar a volta completa no perfil (Wake cut -> Bordo de Ataque -> Wake cut)
+    for i in 0..grid.imax {
+        let x = grid.points[[i, 0]].x;
+        let y = grid.points[[i, 0]].y;
+        
+        let rho_local = domain[[i, 0]].flow_ij.rho;
+
+        // Relação isentrópica para a pressão
+        let cp = cp_multiplier * ((rho_local / rho_inf).powf(gamma) - 1.0);
+
+        // Escreve a linha no CSV
+        writeln!(file, "{:.6},{:.6},{:.6}", x, y, cp).unwrap();
+    }
+
+    println!("Arquivo CSV exportado com sucesso: {}", filename);
 }

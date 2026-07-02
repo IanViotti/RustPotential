@@ -23,7 +23,9 @@ pub struct Config {
 
     pub omega: f64,
 
-    pub M: usize,
+    pub beta_mult: f64,
+
+    pub alpha_sequence_length: usize,
 
     pub C: f64,
 

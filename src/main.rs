@@ -9,6 +9,7 @@ mod config;
 mod job_utils;
 mod solver_core;
 mod solver_utils;
+mod af2;
 
 fn main() {
 
@@ -30,11 +31,14 @@ fn main() {
     // Export results to VTK file
     job_utils::export_vtk_fields(&config, &grid, &field);
 
+    job_utils::export_cp_csv(&config, &grid, &field);
+
     // Print final completion message and elapsed execution time.
     println!("Job completed!");
     
     let duration = start.elapsed();
     println!("Total running time: {:?} \n", duration);
+
 
     println!("Press Enter to finish...");
     
