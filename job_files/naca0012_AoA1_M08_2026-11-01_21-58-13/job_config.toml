@@ -7,11 +7,11 @@
 
 meshname = "mesh/naca0012_fine_mesh.vtk"
 
-jobname = "naca0012"
+jobname = "naca0012_AoA1_M08"
 
 export_metrics = true
 
-Mach_inf = 0.6
+Mach_inf = 0.8
 
 AoA = 1.0
 

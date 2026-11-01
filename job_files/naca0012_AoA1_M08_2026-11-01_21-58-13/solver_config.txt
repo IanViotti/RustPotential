@@ -1,8 +1,8 @@
 ================================================================================
                     RUSTPOTENTIAL SOLVER CONFIGURATION                          
 ================================================================================
-Job Name                : naca0012
-Output Directory        : job_files/naca0012_2026-11-01_17-39-21
+Job Name                : naca0012_AoA1_M08
+Output Directory        : job_files/naca0012_AoA1_M08_2026-11-01_21-58-13
 
 --------------------------------------------------------------------------------
   MESH SPECIFICATIONS                                                           
@@ -18,14 +18,13 @@ Airfoil Wall Boundary   : j = 149
 --------------------------------------------------------------------------------
   FLOW & FLIGHT PARAMETERS                                                      
 --------------------------------------------------------------------------------
-Freestream Mach (M_inf) : 0.600000 (Subsonic)
+Freestream Mach (M_inf) : 0.800000 (Transonic)
 Angle of Attack (AoA)   : 1.0000 deg (0.017453 rad)
-Reynolds Number (Re)    : Infinity (Inviscid)
 Specific Heat Ratio (g) : 1.4000
-Freestream Speed (q_inf): 0.634811 (non-dimensional)
-Freestream Velocity u   : 0.634714
-Freestream Velocity v   : 0.011079
-Freestream Density (rho): 0.840452
+Freestream Speed (q_inf): 0.825137 (non-dimensional)
+Freestream Velocity u   : 0.825011
+Freestream Velocity v   : 0.014401
+Freestream Density (rho): 0.739992
 
 --------------------------------------------------------------------------------
   AF2 NUMERICAL SCHEME CONTROLS                                                 
@@ -38,21 +37,4 @@ Alpha Sequence Length M : 8
 Supersonic Damping Beta : 2.5000
 Holst Upwind Coeff (C)  : 1.5000
 Export Geometric Metrics: true
-================================================================================
-
---------------------------------------------------------------------------------
-  COMPUTATION & AERODYNAMIC RESULTS                                             
---------------------------------------------------------------------------------
-Status                  : MAX ITERATIONS REACHED (4000)
-Final Max Residual      : 5.5491e-5
-Final RMS Residual      : 1.9112e-6
-Total Solver Time       : 63130.67 ms (15.78 ms/iteration)
-Freestream Condition    : M_inf = 0.6000, AoA = 1.00 deg
-Reynolds Number (Re)    : Infinity (Inviscid)
-Flowfield Mach Range    : [0.0093, 1.1545]
-Final Circulation       : Gamma = +0.038290
-Lift Coefficient (Cl)   : +0.1204 (Kutta-Joukowski: +0.1206)
-Drag Coefficient (Cd)   : -0.0004
-Stagnation Cp (Wall)    : +1.0930 (Theoretical: +1.0933) at x = 0.000
-Suction Peak Cp_min     : -1.7548 at x = 1.000
 ================================================================================

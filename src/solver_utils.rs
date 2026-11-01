@@ -283,6 +283,23 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
         }
     }
 
+    // At the sharp trailing-edge wall node (imax - 1, jmax - 1), central coordinate
+    // differencing across the O-grid cusp is singular (x_1 == x_{NX-1} => x_xi = 0).
+    // Reconstruct the TE wall state as the average of the adjacent upper and lower surface nodes.
+    let j_wall = grid.jmax - 1;
+    if grid.imax > 3 {
+        let u_te = 0.5 * (domain[[1, j_wall]].flow_ij.u + domain[[grid.imax - 2, j_wall]].flow_ij.u);
+        let v_te = 0.5 * (domain[[1, j_wall]].flow_ij.v + domain[[grid.imax - 2, j_wall]].flow_ij.v);
+        let q2_te = u_te * u_te + v_te * v_te;
+        let a2_te = (1.0 - c_rho * q2_te).max(1e-5);
+        let rho_te = a2_te.powf(1.0 / (gamma - 1.0));
+        let mach_te = (mach_factor * (q2_te / a2_te)).sqrt();
+        domain[[grid.imax - 1, j_wall]].flow_ij.u = u_te;
+        domain[[grid.imax - 1, j_wall]].flow_ij.v = v_te;
+        domain[[grid.imax - 1, j_wall]].flow_ij.rho = rho_te;
+        domain[[grid.imax - 1, j_wall]].flow_ij.M = mach_te;
+    }
+
     // Farfield boundary at j = 0
     for i in 0..grid.imax {
         domain[[i, 0]].flow_ij.u = config.u_inf;

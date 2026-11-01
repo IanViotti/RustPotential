@@ -1,8 +1,8 @@
 ================================================================================
                     RUSTPOTENTIAL SOLVER CONFIGURATION                          
 ================================================================================
-Job Name                : naca0012
-Output Directory        : job_files/naca0012_2026-11-01_17-55-46
+Job Name                : naca0012_AoA2_M03
+Output Directory        : job_files/naca0012_AoA2_M03_2026-11-01_21-19-34
 
 --------------------------------------------------------------------------------
   MESH SPECIFICATIONS                                                           
@@ -18,13 +18,13 @@ Airfoil Wall Boundary   : j = 149
 --------------------------------------------------------------------------------
   FLOW & FLIGHT PARAMETERS                                                      
 --------------------------------------------------------------------------------
-Freestream Mach (M_inf) : 0.600000 (Subsonic)
-Angle of Attack (AoA)   : 0.0000 deg (0.000000 rad)
+Freestream Mach (M_inf) : 0.300000 (Subsonic)
+Angle of Attack (AoA)   : 2.0000 deg (0.034907 rad)
 Specific Heat Ratio (g) : 1.4000
-Freestream Speed (q_inf): 0.634811 (non-dimensional)
-Freestream Velocity u   : 0.634811
-Freestream Velocity v   : 0.000000
-Freestream Density (rho): 0.840452
+Freestream Speed (q_inf): 0.325715 (non-dimensional)
+Freestream Velocity u   : 0.325517
+Freestream Velocity v   : 0.011367
+Freestream Density (rho): 0.956380
 
 --------------------------------------------------------------------------------
   AF2 NUMERICAL SCHEME CONTROLS                                                 
