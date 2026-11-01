@@ -107,10 +107,12 @@ $$N = -\frac{1}{\alpha} \left( \alpha - \overrightarrow{\delta}_\eta A_j \right)
 This yields a two-step alternating factorization:
 
 1. **Step 1 (Radial Sweep in $\eta$)**:
+
    $$\left( \alpha - \overrightarrow{\delta}_\eta A_j \right) f_{i, j} = \alpha \omega L(\phi^n)_{i, j}$$
    Because $\overrightarrow{\delta}_\eta$ is a forward operator, the sweep marches backwards from the wall ($j = j_{\max} - 1$) down to the farfield ($j = 1$), initialized with the solid-wall condition $f_{i, NY+1} = 0$.
 
 2. **Step 2 (Azimuthal Sweep in $\xi$)**:
+
    $$\left( \alpha \overleftarrow{\delta}_\eta - \overrightarrow{\delta}_\xi A_i \overleftarrow{\delta}_\xi \pm \alpha \beta \overrightarrow{\overleftarrow{\delta}}_\xi \right) C_{i, j} = f_{i, j}$$
    Solved ring-by-ring from $j = 1$ to $j = j_{\max} - 1$. The cyclic tridiagonal boundary condition across the periodic wake cut ($i = 0 \leftrightarrow i = i_{\max} - 1$) is resolved using the **Sherman-Morrison formula**.
 
