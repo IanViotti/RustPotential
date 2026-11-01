@@ -3,6 +3,7 @@ use crate::job_utils::Grid;
 use crate::solver_utils::PointData;
 
 /// Main orchestrator for the AF2 numerical scheme
+#[allow(clippy::too_many_arguments)]
 pub fn execute_af2(
     grid: &Grid,
     domain: &mut Array2<PointData>,
@@ -11,6 +12,8 @@ pub fn execute_af2(
     beta_sub: f64,
     beta_sup: f64,
     omega: f64,
+    gamma_n: f64,
+    gamma_nm1: f64,
 ) {
     let mut f_inter = Array2::<f64>::zeros((grid.imax, grid.jmax));
     let mut delta_phi = Array2::<f64>::zeros((grid.imax, grid.jmax));
@@ -47,7 +50,8 @@ pub fn execute_af2(
     // =========================================================
     for j in 1..grid.jmax {
         step2_tridiagonal_xi(
-            j, alpha, beta_sub, beta_sup, grid, domain, &f_inter, &mut delta_phi,
+            j, alpha, beta_sub, beta_sup, gamma_n, gamma_nm1,
+            grid, domain, &f_inter, &mut delta_phi,
             &mut a, &mut b, &mut c, &mut d, 
             &mut y, &mut z, &mut c_prime, &mut d_prime, &mut d_z,
         );
@@ -62,9 +66,9 @@ pub fn execute_af2(
         }
     }
 
-    // Exact synchronization of the periodic wake cut
+    // Synchronize the wake cut potential jump with current circulation
     for j in 0..grid.jmax {
-        domain[[0, j]].flow_ij.phi = domain[[grid.imax - 1, j]].flow_ij.phi;
+        domain[[0, j]].flow_ij.phi = domain[[grid.imax - 1, j]].flow_ij.phi + gamma_n;
     }
 }
 
@@ -107,14 +111,17 @@ fn step1_bidiagonal_eta(
     f_inter[[i, 0]] = 0.0;
 }
 
-/// Solves the second step of AF2 incorporating temporal damping (Beta).
-/// Uses Sherman-Morrison to enforce exact periodicity at the wake cut.
+/// Solves the second step of AF2 incorporating temporal damping (Beta)
+/// and implicit circulation wake-cut conditions (Pages 56-57).
+/// Uses Sherman-Morrison to enforce cyclic coupling across the wake cut.
 #[allow(clippy::too_many_arguments)]
 fn step2_tridiagonal_xi(
     j: usize,
     alpha: f64,
     beta_sub: f64,
     beta_sup: f64,
+    gamma_n: f64,
+    gamma_nm1: f64,
     grid: &Grid,
     domain: &Array2<PointData>,
     f_inter: &Array2<f64>,
@@ -165,6 +172,13 @@ fn step2_tridiagonal_xi(
         }
     }
 
+    // Implicit wake-cut boundary condition for circulation (Pages 56-57 of lecture notes):
+    // At i = 2 (idx = 0): C^n_{1, j} = C^n_{NX, j} + (Gamma^n - Gamma^{n-1})
+    // At i = NX (idx = n - 1): C^n_{NX+1, j} = C^n_{2, j} - (Gamma^n - Gamma^{n-1})
+    let d_gamma = gamma_n - gamma_nm1;
+    d[0] -= a[0] * d_gamma;
+    d[n - 1] += c[n - 1] * d_gamma;
+
     // 2. Sherman-Morrison Modification for Cyclic Tridiagonal System
     let gamma = -b[0]; 
     
@@ -187,8 +201,8 @@ fn step2_tridiagonal_xi(
         delta_phi[[i, j]] = y[idx] - fact * z[idx];
     }
 
-    // 5. Enforce periodicity at the exact Wake Cut overlap
-    delta_phi[[0, j]] = delta_phi[[grid.imax - 1, j]];
+    // 5. Wake Cut delta_phi at i = 0
+    delta_phi[[0, j]] = delta_phi[[grid.imax - 1, j]] + d_gamma;
 }
 
 /// Helper: Standard Thomas Algorithm.

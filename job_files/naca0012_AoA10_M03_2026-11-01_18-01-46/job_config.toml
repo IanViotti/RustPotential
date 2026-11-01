@@ -1,0 +1,34 @@
+# ===================================================
+# RustPotential Solver Configuration
+# ===================================================
+
+# jobname (used for directory and files creation)
+# This will be the name of the output folder inside 'job_files/'
+
+meshname = "mesh/naca0012_fine_mesh.vtk"
+
+jobname = "naca0012_AoA10_M03"
+
+export_metrics = true
+
+Mach_inf = 0.3
+
+AoA = 10.0
+
+Rg = 0.5
+
+max_iterations = 2000
+
+omega = 1.0
+
+beta_mult = 2.5
+
+alpha_sequence_length = 8
+
+convergence_residual = 1E-5
+
+gamma = 1.4
+
+C = 1.5
+
+

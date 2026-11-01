@@ -1,0 +1,58 @@
+================================================================================
+                    RUSTPOTENTIAL SOLVER CONFIGURATION                          
+================================================================================
+Job Name                : naca0012
+Output Directory        : job_files/naca0012_2026-11-01_17-39-21
+
+--------------------------------------------------------------------------------
+  MESH SPECIFICATIONS                                                           
+--------------------------------------------------------------------------------
+Mesh File               : mesh/naca0012_fine_mesh.vtk
+Grid Dimensions (imax)  : 713 (Azimuthal / Xi direction)
+Grid Dimensions (jmax)  : 150 (Radial / Eta direction)
+Total Grid Nodes        : 106950
+Wake Cut Node Pair      : i = 0 <-> i = 712
+Farfield Boundary       : j = 0
+Airfoil Wall Boundary   : j = 149
+
+--------------------------------------------------------------------------------
+  FLOW & FLIGHT PARAMETERS                                                      
+--------------------------------------------------------------------------------
+Freestream Mach (M_inf) : 0.600000 (Subsonic)
+Angle of Attack (AoA)   : 1.0000 deg (0.017453 rad)
+Reynolds Number (Re)    : Infinity (Inviscid)
+Specific Heat Ratio (g) : 1.4000
+Freestream Speed (q_inf): 0.634811 (non-dimensional)
+Freestream Velocity u   : 0.634714
+Freestream Velocity v   : 0.011079
+Freestream Density (rho): 0.840452
+
+--------------------------------------------------------------------------------
+  AF2 NUMERICAL SCHEME CONTROLS                                                 
+--------------------------------------------------------------------------------
+Max Iterations          : 4000
+Convergence Tolerance   : 1.00e-5
+Relaxation Factor (w)   : 1.0000
+Circulation Relax (Rg)  : 0.5000
+Alpha Sequence Length M : 8
+Supersonic Damping Beta : 2.5000
+Holst Upwind Coeff (C)  : 1.5000
+Export Geometric Metrics: true
+================================================================================
+
+--------------------------------------------------------------------------------
+  COMPUTATION & AERODYNAMIC RESULTS                                             
+--------------------------------------------------------------------------------
+Status                  : MAX ITERATIONS REACHED (4000)
+Final Max Residual      : 5.5491e-5
+Final RMS Residual      : 1.9112e-6
+Total Solver Time       : 63130.67 ms (15.78 ms/iteration)
+Freestream Condition    : M_inf = 0.6000, AoA = 1.00 deg
+Reynolds Number (Re)    : Infinity (Inviscid)
+Flowfield Mach Range    : [0.0093, 1.1545]
+Final Circulation       : Gamma = +0.038290
+Lift Coefficient (Cl)   : +0.1204 (Kutta-Joukowski: +0.1206)
+Drag Coefficient (Cd)   : -0.0004
+Stagnation Cp (Wall)    : +1.0930 (Theoretical: +1.0933) at x = 0.000
+Suction Peak Cp_min     : -1.7548 at x = 1.000
+================================================================================

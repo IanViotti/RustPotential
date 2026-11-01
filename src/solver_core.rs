@@ -12,6 +12,7 @@ pub struct SolverStats {
     pub converged: bool,
     pub final_max_res: f64,
     pub final_rms_res: f64,
+    pub final_gamma: f64,
 }
 
 /// Main entry point for the computational fluid dynamics solver.
@@ -27,7 +28,7 @@ pub fn solve(grid: &Grid, config: &config::Config) -> (Array2<solver_utils::Poin
     let stats = main_solver_loop(config, grid, &mut domain);
 
     // 4. Calculate true Cartesian velocities and final flow variables for post-processing/VTK
-    solver_utils::calculate_field(config, grid, &mut domain);
+    solver_utils::calculate_field(config, grid, &mut domain, stats.final_gamma);
     
     (domain, stats)
 }
@@ -48,6 +49,11 @@ fn main_solver_loop(
     let b_high = beta_sup + 1.0;
     let b_low = (beta_sup - 1.0).max(0.1);
 
+    // Circulation history for Kutta condition & implicit wake-cut relaxation (Pages 54-57)
+    let mut gamma_n: f64 = 0.0;
+    let mut gamma_nm1: f64 = 0.0;
+    let mut gamma_nm2: f64 = 0.0;
+
     // Residual history to compare iteration n with (n - M)
     let mut prev_rms_res: f64 = 0.0;
     let mut prev_max_res: f64 = 0.0;
@@ -62,11 +68,21 @@ fn main_solver_loop(
         // Fix alpha cycle indexing: iteration 1 uses alphas[0] = alpha_H
         let alpha = alphas[(iteration - 1) % m_cycle];
 
-        // Step A: Update thermodynamics and Holst artificial density across domain
-        update_thermodynamics(config, grid, domain);
+        // Update circulation Gamma^n via Kutta condition at trailing edge (Pages 55-56)
+        if iteration > 1 {
+            let ny = grid.jmax - 1;
+            // (phi_xi)_{NX, NY} = 0 => tilde_Gamma^n = phi^n_{2, NY} - phi^n_{NX-1, NY}
+            let gamma_tilde = domain[[1, ny]].flow_ij.phi - domain[[grid.imax - 2, ny]].flow_ij.phi;
+            let gamma_bar = config.Rg * gamma_tilde + (1.0 - config.Rg) * gamma_nm1;
+            let gamma_est = 2.0 * gamma_nm1 - gamma_nm2;
+            gamma_n = 0.5 * (gamma_bar + gamma_est);
+        }
 
-        // Step B: Enforce boundary conditions and periodic wake cut
-        enforce_boundary_conditions(config, grid, domain);
+        // Step A: Enforce boundary conditions (farfield vortex + wake cut potential jump)
+        enforce_boundary_conditions(config, grid, domain, gamma_n);
+
+        // Step B: Update thermodynamics and Holst artificial density across domain
+        update_thermodynamics(config, grid, domain, gamma_n);
         
         // 1. Calculate the Residual field L(phi) for interior and wall (j = 1..grid.jmax)
         let mut max_res = 0.0;
@@ -132,7 +148,7 @@ fn main_solver_loop(
             } else {
                 "Iterating"
             };
-            crate::ui::print_iteration_row(iteration, max_res, rms_res, beta_sup, status);
+            crate::ui::print_iteration_row(iteration, max_res, rms_res, gamma_n, beta_sup, status);
         }
 
         if is_converged {
@@ -142,11 +158,16 @@ fn main_solver_loop(
                 converged: true,
                 final_max_res: max_res,
                 final_rms_res: rms_res,
+                final_gamma: gamma_n,
             };
         }
 
         // 3. Execute the AF2 Scheme
-        af2::execute_af2(grid, domain, &residual, alpha, beta_sub, beta_sup, omega);
+        af2::execute_af2(grid, domain, &residual, alpha, beta_sub, beta_sup, omega, gamma_n, gamma_nm1);
+
+        // Advance circulation history for next iteration
+        gamma_nm2 = gamma_nm1;
+        gamma_nm1 = gamma_n;
     }
 
     crate::ui::print_iteration_footer();
@@ -155,25 +176,39 @@ fn main_solver_loop(
         converged: false,
         final_max_res: last_max_res,
         final_rms_res: last_rms_res,
+        final_gamma: gamma_n,
     }
 }
 
-pub fn update_thermodynamics(config: &config::Config, grid: &Grid, domain: &mut Array2<solver_utils::PointData>) {
+pub fn update_thermodynamics(
+    config: &config::Config,
+    grid: &Grid,
+    domain: &mut Array2<solver_utils::PointData>,
+    gamma_n: f64,
+) {
     let gamma = config.gamma;
     let c_rho = (gamma - 1.0) / (gamma + 1.0);
     let mach_factor = 2.0 / (gamma + 1.0);
+
+    // Helper for potential at (i + 1, j) on the same branch as (i, j):
+    // At i = imax - 1 (NX in 1-based), node NX+1 wraps to i = 1 (2 in 1-based) with jump -Gamma^n.
+    // Note that for left neighbor (i - 1, j), domain[[0, j]].flow_ij.phi is already phi_{NX, j} + Gamma^n.
+    let phi_plus = |i_idx: usize, j_idx: usize, dom: &Array2<solver_utils::PointData>| -> f64 {
+        if i_idx == grid.imax - 1 {
+            dom[[1, j_idx]].flow_ij.phi - gamma_n
+        } else {
+            dom[[i_idx + 1, j_idx]].flow_ij.phi
+        }
+    };
 
     // =========================================================
     // CYCLE 1: Isentropic Properties, Mach, and Contravariant Velocities
     // j = 0 is Farfield, j = grid.jmax - 1 is Airfoil Surface
     // =========================================================
     for i in 1..grid.imax {
-        let i_plus = if i == grid.imax - 1 { 1 } else { i + 1 };
-        let i_minus = if i == 1 { grid.imax - 1 } else { i - 1 };
-
         for j in 0..grid.jmax {
             // --- Faces Xi (i+1/2, j) ---
-            let phi_xi_ip12j = domain[[i_plus, j]].flow_ij.phi - domain[[i, j]].flow_ij.phi;
+            let phi_xi_ip12j = phi_plus(i, j, domain) - domain[[i, j]].flow_ij.phi;
             let phi_eta_ip12j = if j == grid.jmax - 1 {
                 // Wall tangency at (i+1/2, wall)
                 -(domain[[i, j]].metrics_ip12j.A2 / domain[[i, j]].metrics_ip12j.A3) * phi_xi_ip12j
@@ -181,12 +216,12 @@ pub fn update_thermodynamics(config: &config::Config, grid: &Grid, domain: &mut 
                 // Farfield forward difference
                 0.5 * (
                     (domain[[i, 1]].flow_ij.phi - domain[[i, 0]].flow_ij.phi) +
-                    (domain[[i_plus, 1]].flow_ij.phi - domain[[i_plus, 0]].flow_ij.phi)
+                    (phi_plus(i, 1, domain) - phi_plus(i, 0, domain))
                 )
             } else {
                 0.25 * (
                     (domain[[i, j + 1]].flow_ij.phi - domain[[i, j - 1]].flow_ij.phi) +
-                    (domain[[i_plus, j + 1]].flow_ij.phi - domain[[i_plus, j - 1]].flow_ij.phi)
+                    (phi_plus(i, j + 1, domain) - phi_plus(i, j - 1, domain))
                 )
             };
 
@@ -201,8 +236,8 @@ pub fn update_thermodynamics(config: &config::Config, grid: &Grid, domain: &mut 
             if j < grid.jmax - 1 {
                 let phi_eta_ijp12 = domain[[i, j + 1]].flow_ij.phi - domain[[i, j]].flow_ij.phi;
                 let phi_xi_ijp12 = 0.25 * (
-                    (domain[[i_plus, j]].flow_ij.phi - domain[[i_minus, j]].flow_ij.phi) +
-                    (domain[[i_plus, j + 1]].flow_ij.phi - domain[[i_minus, j + 1]].flow_ij.phi)
+                    (phi_plus(i, j, domain) - domain[[i - 1, j]].flow_ij.phi) +
+                    (phi_plus(i, j + 1, domain) - domain[[i - 1, j + 1]].flow_ij.phi)
                 );
 
                 domain[[i, j]].flow_ijp12.U = domain[[i, j]].metrics_ijp12.A1 * phi_xi_ijp12 + domain[[i, j]].metrics_ijp12.A2 * phi_eta_ijp12;
@@ -215,7 +250,7 @@ pub fn update_thermodynamics(config: &config::Config, grid: &Grid, domain: &mut 
 
             // --- Integer Node (i, j) for Mach and Contravariant Velocity ---
             if j > 0 {
-                let phi_xi_ij = 0.5 * (domain[[i_plus, j]].flow_ij.phi - domain[[i_minus, j]].flow_ij.phi);
+                let phi_xi_ij = 0.5 * (phi_plus(i, j, domain) - domain[[i - 1, j]].flow_ij.phi);
                 let phi_eta_ij = if j == grid.jmax - 1 {
                     // Wall tangency: V = 0 => phi_eta = -(A2/A3)*phi_xi
                     -(domain[[i, j]].metrics_ij.A2 / domain[[i, j]].metrics_ij.A3.max(1e-12)) * phi_xi_ij
@@ -238,7 +273,7 @@ pub fn update_thermodynamics(config: &config::Config, grid: &Grid, domain: &mut 
     }
 
     // Synchronize boundaries before computing artificial density upwind
-    enforce_boundary_conditions(config, grid, domain);
+    enforce_boundary_conditions(config, grid, domain, gamma_n);
 
     // =========================================================
     // CYCLE 2: Artificial Density (Holst's Upwind Formulation)
@@ -290,7 +325,7 @@ pub fn update_thermodynamics(config: &config::Config, grid: &Grid, domain: &mut 
     }
 
     // Final boundary sync for the iteration
-    enforce_boundary_conditions(config, grid, domain);
+    enforce_boundary_conditions(config, grid, domain, gamma_n);
 }
 
 fn calc_L_phi_ij(grid: &Grid, domain: &Array2<solver_utils::PointData>, i: usize, j: usize) -> f64 {
@@ -317,26 +352,58 @@ fn calc_L_phi_ij(grid: &Grid, domain: &Array2<solver_utils::PointData>, i: usize
     d_flux_xi + d_flux_eta
 }
 
-pub fn enforce_boundary_conditions(config: &config::Config, grid: &Grid, domain: &mut Array2<solver_utils::PointData>) {
+pub fn enforce_boundary_conditions(
+    config: &config::Config,
+    grid: &Grid,
+    domain: &mut Array2<solver_utils::PointData>,
+    gamma_n: f64,
+) {
     let imax = grid.imax;
     let jmax = grid.jmax;
 
-    // 1. Wake Cut Periodicity (i = 0 is a duplicate of i = imax - 1)
+    // 1. Farfield Condition at j = 0 (Page 54 of lecture notes):
+    // phi_{i, 1} = phi_inf + phi_vortex
+    // where phi_vortex = -(Gamma / 2*pi) * arctan(beta * y / (x - 0.25))
+    let beta_prandtl = (1.0 - config.Mach_inf.powi(2)).max(1e-6).sqrt();
+    let two_pi = 2.0 * std::f64::consts::PI;
+
+    for i in 0..imax {
+        let x = grid.points[[i, 0]].x;
+        let y = grid.points[[i, 0]].y;
+        let phi_inf = config.u_inf * x + config.v_inf * y;
+
+        // Angle theta in [0, 2*pi] measured counter-clockwise from the wake cut (x > 0.25, y = 0)
+        let theta = if i == 0 {
+            0.0
+        } else if i == imax - 1 {
+            two_pi
+        } else {
+            let mut ang = (beta_prandtl * y).atan2(x - 0.25);
+            if ang < 0.0 {
+                ang += two_pi;
+            }
+            ang
+        };
+
+        let phi_vortex = -(gamma_n / two_pi) * theta;
+
+        domain[[i, 0]].flow_ij.phi = phi_inf + phi_vortex;
+        domain[[i, 0]].flow_ij.rho = config.rho_inf;
+        domain[[i, 0]].flow_ij.M = config.Mach_inf;
+        domain[[i, 0]].flow_ij.u = config.u_inf;
+        domain[[i, 0]].flow_ij.v = config.v_inf;
+    }
+
+    // 2. Wake Cut Condition (Pages 54-55 of lecture notes):
+    // Physical properties (velocity, density, Mach) are continuous across the wake cut,
+    // whereas velocity potential has a branch-cut jump of +Gamma^n:
+    // phi^n_{1, j} = phi^n_{NX, j} + Gamma^n
     for j in 0..jmax {
         domain[[0, j]].flow_ij = domain[[imax - 1, j]].flow_ij;
+        domain[[0, j]].flow_ij.phi = domain[[imax - 1, j]].flow_ij.phi + gamma_n;
         domain[[0, j]].flow_ip12j = domain[[imax - 1, j]].flow_ip12j;
         if j < jmax - 1 {
             domain[[0, j]].flow_ijp12 = domain[[imax - 1, j]].flow_ijp12;
         }
-    }
-
-    // 2. Farfield Condition at j = 0
-    for i in 0..imax {
-        let x = grid.points[[i, 0]].x;
-        domain[[i, 0]].flow_ij.phi = config.u_inf * x; 
-        domain[[i, 0]].flow_ij.rho = config.rho_inf;
-        domain[[i, 0]].flow_ij.M = config.Mach_inf;
-        domain[[i, 0]].flow_ij.u = config.u_inf;
-        domain[[i, 0]].flow_ij.v = 0.0;
     }
 }
