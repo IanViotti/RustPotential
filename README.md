@@ -35,7 +35,7 @@ The Full Potential equation models compressible, inviscid, irrotational, and ise
 - Written in clean, safe, modern Rust leveraging the `ndarray` library.
 - Output format in .vtk, compatible with Paraview for results visualization.
 
-![alt text](naca0012_shockwave.png "Example Shock Wave")
+![alt text](job_files/naca0012/naca0012_shockwave.png "Example Shock Wave")
 
 ---
 
