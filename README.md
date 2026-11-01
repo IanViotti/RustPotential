@@ -37,7 +37,7 @@ The Full Potential equation models compressible, inviscid, irrotational, and ise
 - **Reproducible Timestamped Runs**: Each execution creates a dedicated timestamped folder (`job_files/<jobname>_<YYYY-MM-DD_HH-MM-SS>/`) storing the VTK solution, surface $C_p$ CSV, a detailed `solver_config.txt` summary (including mesh specifications), and a snapshot of `job_config.toml`.
 - Written in clean, safe, modern Rust leveraging the `ndarray` library.
 
-![alt text](job_files/naca0012/naca0012_shockwave.png "Example Shock Wave")
+![alt text](job_files/naca0012_AoA1_M08_2026-11-01_21-58-13/shockwave.png "Example Shock Wave")
 
 ---
 
