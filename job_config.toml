@@ -9,13 +9,13 @@ meshname = "mesh/naca0012_fine_mesh.vtk"
 
 jobname = "naca0012"
 
-export_metrics = false
+export_metrics = true
 
-Mach_inf = 0.8
+Mach_inf = 0.95
 
-max_iterations = 1000
+max_iterations = 2000
 
-omega = 1.3
+omega = 1.0
 
 beta_mult = 2.5
 
@@ -26,5 +26,3 @@ convergence_residual = 1E-5
 gamma = 1.4
 
 C = 1.5
-
-                

@@ -41,7 +41,9 @@ impl Config {
     /// Método para popular as variáveis que dependem da física após a leitura do arquivo
     pub fn compute_derived_variables(&mut self) {
         // Inifinite velocity
-        self.u_inf = ((self.gamma + 1.0) / (self.gamma - 1.0 + 2.0 / self.Mach_inf.powi(2))).sqrt();
+        //self.u_inf = ((self.gamma + 1.0) / (self.gamma - 1.0 + 2.0 / self.Mach_inf.powi(2))).sqrt();
+        let q_inf = ((self.gamma + 1.0) * self.Mach_inf.powi(2) / (2.0 + (self.gamma - 1.0) * self.Mach_inf.powi(2))).sqrt();
+        self.u_inf = q_inf;
         
         // Infinite density (usando a relação isentrópica para fluxo compressível)
         self.rho_inf = (1.0 - (self.gamma - 1.0) / (self.gamma + 1.0) * self.u_inf.powi(2)).powf(1.0 / (self.gamma - 1.0));

@@ -33,7 +33,7 @@ pub struct Grid {
 pub fn read_config(filename: &str) -> config::Config {
     // 1. Read the contents of the TOML file into a string.
     let config_content = fs::read_to_string(filename)
-        .expect(&format!("Could not read the {} file. Please make sure it exists and is in the correct path.\n", filename));
+        .unwrap_or_else(|_| panic!("Could not read the {} file. Please make sure it exists and is in the correct path.\n", filename));
 
     // 2. Deserialize using the 'toml' crate
     let mut config: config::Config = toml::from_str(&config_content)
@@ -41,21 +41,12 @@ pub fn read_config(filename: &str) -> config::Config {
 
     config.compute_derived_variables();
 
-    // Display job startup information
-    println!("\n
-            +-----------------------------+\n
-            Starting job: {}\n
-            +-----------------------------+\n", config.jobname);
-
-    println!("Configuration loaded: \n{:#?}\n", config);
-
-
     config
 }
 
 pub fn init_job_directory(config: &config::Config) {
     let jobname = &config.jobname;
-    std::fs::create_dir_all(&format!("job_files/{}", jobname)).unwrap();
+    std::fs::create_dir_all(format!("job_files/{}", jobname)).unwrap();
 }
 
 // ==========================================
@@ -63,9 +54,11 @@ pub fn init_job_directory(config: &config::Config) {
 // ==========================================
 
 /// Reads a structured grid .vtk file and reconstructs the coordinate matrices.
-/// Triggers a panic if the file cannot be read or parsed properly.
+/// Reorients into the course lecture note convention for O-grids:
+/// - j = 0 at farfield, j = jmax - 1 at airfoil surface (eta points inward)
+/// - i = 0 at TE, i increases counter-clockwise (upper surface -> LE -> lower surface -> TE)
 pub fn read_vtk_structured_grid(filepath: &str) -> Grid {
-    let file = File::open(filepath).expect(&format!("Failed to open VTK file: {}", filepath));
+    let file = File::open(filepath).unwrap_or_else(|_| panic!("Failed to open VTK file: {}", filepath));
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
 
@@ -86,8 +79,10 @@ pub fn read_vtk_structured_grid(filepath: &str) -> Grid {
         if line.starts_with("POINTS") {
             points_array = Array2::from_elem((imax, jmax), Point { x: 0.0, y: 0.0 });
 
-            for j in 0..jmax {
-                for i in 0..imax {
+            for j_raw in 0..jmax {
+                let j = jmax - 1 - j_raw;
+                for i_raw in 0..imax {
+                    let i = imax - 1 - i_raw;
                     if let Some(Ok(point_line)) = lines.next() {
                         let coords: Vec<f64> = point_line
                             .split_whitespace()
@@ -114,8 +109,8 @@ pub fn read_vtk_structured_grid(filepath: &str) -> Grid {
 
 
 pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<solver_utils::PointData>) {
-    let file_path = &format!("job_files/{}/solution.vtk", config.jobname);
-    let file = File::create(file_path).expect(&format!("Failed to create VTK output file: {}", config.jobname));
+    let file_path = format!("job_files/{}/solution.vtk", config.jobname);
+    let file = File::create(&file_path).unwrap_or_else(|_| panic!("Failed to create VTK output file: {}", config.jobname));
     let mut writer = BufWriter::new(file);
 
     // Internal closure to use the '?' operator without dirtying the main function signature
@@ -179,7 +174,7 @@ pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<s
         }
 
         // =========================================================
-        // 4. Métricas Geométricas Opcionais
+        // 4. Geometric Metrics (Optional)
         // =========================================================
         if config.export_metrics {
             // --- Scalar Field: Jacobian (J) ---
@@ -230,41 +225,32 @@ pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<s
 
 
 pub fn export_cp_csv(config: &config::Config, grid: &Grid, domain: &Array2<PointData>) {
-    println!("Exportando distribuição de Cp para CSV...");
+    println!("Exporting Cp distribution to CSV...");
 
-    // Cria o nome do arquivo baseado no nome da malha/job
     let filename = format!("job_files/{}/Cp_distribution.csv", config.jobname);
-    let mut file = File::create(&filename).expect("Falha ao criar o arquivo CSV");
+    let mut file = File::create(&filename).unwrap_or_else(|_| panic!("Failed to create CSV file: {}", filename));
 
-    // Cabeçalho do CSV. Exportar o 'y' é crucial na Malha O para separar o intradorso do extradorso na hora de plotar.
     writeln!(file, "x,y,Cp").unwrap();
 
     let gamma = config.gamma;
     let m_inf = config.Mach_inf;
-    let c_rho = (gamma - 1.0) / (gamma + 1.0);
-
-    // 1. Reconstruir a densidade de freestream (rho_inf) usando a normalização exata de Holst
-    let u_inf_squared = ((gamma + 1.0) * m_inf.powi(2)) / (2.0 + (gamma - 1.0) * m_inf.powi(2));
-    let a2_inf = 1.0 - c_rho * u_inf_squared;
-    let rho_inf = a2_inf.max(1e-5).powf(1.0 / (gamma - 1.0));
-
-    // Multiplicador frontal da equação do Cp
+    let rho_inf = config.rho_inf;
     let cp_multiplier = 2.0 / (gamma * m_inf.powi(2));
 
-    // 2. Varrer a parede do aerofólio (j = 0)
-    // O loop vai de 0 a imax-1 para dar a volta completa no perfil (Wake cut -> Bordo de Ataque -> Wake cut)
-    for i in 0..grid.imax {
-        let x = grid.points[[i, 0]].x;
-        let y = grid.points[[i, 0]].y;
-        
-        let rho_local = domain[[i, 0]].flow_ij.rho;
+    // Airfoil surface is at j = jmax - 1
+    let j_wall = grid.jmax - 1;
 
-        // Relação isentrópica para a pressão
+    // Loop from 0 to imax-2 to complete profile without duplicating trailing edge
+    for i in 0..grid.imax - 1 {
+        let x = grid.points[[i, j_wall]].x;
+        let y = grid.points[[i, j_wall]].y;
+        let rho_local = domain[[i, j_wall]].flow_ij.rho;
+
+        // Isentropic relation for pressure coefficient Cp
         let cp = cp_multiplier * ((rho_local / rho_inf).powf(gamma) - 1.0);
 
-        // Escreve a linha no CSV
         writeln!(file, "{:.6},{:.6},{:.6}", x, y, cp).unwrap();
     }
 
-    println!("Arquivo CSV exportado com sucesso: {}", filename);
+    println!("CSV file exported successfully: {}", filename);
 }
