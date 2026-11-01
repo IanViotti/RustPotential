@@ -5,25 +5,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug executable 'full_potential'",
+            "name": "Debug executable 'RustPotential'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "run",
-                    "--bin=full_potential"
+                    "--bin=RustPotential"
                 ]
             },
             "args": []
         },
         {
-            "name": "Debug unit tests in executable 'full_potential'",
+            "name": "Debug unit tests in executable 'RustPotential'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "test",
-                    "--bin=full_potential"
+                    "--bin=RustPotential"
                 ]
             }
         }

@@ -1,4 +1,4 @@
-# Full Potential CFD Solver in Rust
+# RustPotential - Full Potential CFD Solver in Rust
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Language: Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org/)
@@ -136,11 +136,11 @@ This yields a two-step alternating factorization:
 ## Project File Structure
 
 ```text
-full_potential_antigravity/
+RustPotential/
 ├── Cargo.toml               # Rust package manifest & dependencies
 ├── job_config.toml          # Simulation configuration (TOML)
 ├── README.md                # Project documentation & theoretical background
-├── full_potential.exe       # Standalone compiled release binary
+├── RustPotential.exe       # Standalone compiled release binary
 ├── mesh/                    # Structured 2D O-grid meshes (.vtk)
 │   ├── biconvex_mesh.vtk         # Parabolic biconvex airfoil (213 x 65)
 │   ├── biconvex_fine_mesh.vtk    # Fine biconvex mesh
@@ -179,9 +179,9 @@ full_potential_antigravity/
    ```
 
 2. **Run Standalone Executable**:
-   Double-click `full_potential.exe` in Windows Explorer or run from PowerShell:
+   Double-click `RustPotential.exe` in Windows Explorer or run from PowerShell:
    ```powershell
-   .\full_potential.exe
+   .\RustPotential.exe
    ```
    *Note*: The application displays a progress dashboard and pauses on completion (`Press [Enter] to exit...`) so you can review metrics without the terminal closing prematurely.
 
@@ -275,3 +275,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
