@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 // External modules
+use std::panic;
 use std::time::Instant;
 
 // Import internal modules
@@ -11,7 +12,7 @@ mod solver_utils;
 mod af2;
 mod ui;
 
-fn main() {
+fn run_solver() {
     // 1. Visual project headline banner
     ui::print_banner();
 
@@ -41,7 +42,13 @@ fn main() {
     // 8. Comprehensive summary with aerodynamic metrics
     let duration = start.elapsed();
     ui::print_summary(&config, &grid, &field, &stats, duration);
+}
 
-    // 9. Prevent terminal from auto-closing; wait for user input
+fn main() {
+    if panic::catch_unwind(run_solver).is_err() {
+        eprintln!("\n[ERROR] Solver execution aborted due to the error above.");
+    }
+
+    // 9. Prevent terminal from auto-closing; always wait for user input even on error
     ui::wait_for_user_exit();
 }
