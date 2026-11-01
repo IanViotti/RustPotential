@@ -31,11 +31,10 @@ An efficient, high-fidelity 2D Computational Fluid Dynamics (CFD) solver for the
 The Full Potential equation models compressible, inviscid, irrotational, and isentropic flow:
 - Capable of modeling subsonic, critical, and transonic flows with weak shock waves ($M_1 \le 1.3$).
 - **Full Lifting Flow Support ($\text{AoA} \neq 0^\circ$)**: Implements circulation ($\Gamma$) via a trailing-edge branch cut on the O-grid, Kutta condition enforcement, compressible Prandtl-Glauert farfield point-vortex correction, and implicit AF2 wake-cut jump coupling.
-- **Aerodynamic Force Diagnostics**: Automatically computes surface pressure integration for lift ($C_l$) and pressure/wave drag ($C_d$), alongside theoretical Kutta-Joukowski lift verification ($C_{l,\text{KJ}} = 2\Gamma / q_\infty$).
 - Solved in **strong conservative form** to guarantee mass conservation across captured shock discontinuities.
 - Implemented with **zero heap allocation** in the inner iteration loops using pre-allocated cyclic tridiagonal buffers.
-- **Reproducible Timestamped Runs**: Each execution creates a dedicated timestamped folder (`job_files/<jobname>_<YYYY-MM-DD_HH-MM-SS>/`) storing the VTK solution, surface $C_p$ CSV, a detailed `solver_config.txt` summary (including mesh specifications), and a snapshot of `job_config.toml`.
 - Written in clean, safe, modern Rust leveraging the `ndarray` library.
+- Outputs .vtk file format to be visualized in Paraview.\
 
 ![alt text](job_files/naca0012/naca0012_shockwave.png "Example Shock Wave")
 
