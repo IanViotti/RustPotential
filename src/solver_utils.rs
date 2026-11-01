@@ -56,7 +56,7 @@ pub struct PointData {
 // 2. INITIALIZATION AND CALCULATION FUNCTIONS
 // ==========================================
 
-/// Creates the data grid and initializes the nodal fields (e.g., freestream potential)
+/// Creates the data grid and initializes the nodal fields (freestream potential with AoA)
 pub fn initialize_domain(config: &config::Config, grid: &Grid) -> Array2<PointData> {
     println!("Initializing computational domain...");
     
@@ -64,25 +64,28 @@ pub fn initialize_domain(config: &config::Config, grid: &Grid) -> Array2<PointDa
     
     for i in 0..grid.imax {
         for j in 0..grid.jmax {
+            let x = grid.points[[i, j]].x;
+            let y = grid.points[[i, j]].y;
+
             domain[[i, j]].flow_ij = NodalFlow {
-                // Initialize velocity potential assuming uniform flow (0 deg angle of attack)
-                phi: config.u_inf * grid.points[[i, j]].x, 
+                // Initialize velocity potential assuming uniform freestream at angle of attack AoA
+                phi: config.u_inf * x + config.v_inf * y, 
                 M: config.Mach_inf,
                 rho: config.rho_inf,
                 u: config.u_inf,
-                v: 0.0,
+                v: config.v_inf,
             };
 
             domain[[i, j]].flow_ip12j = HalfPointFlow {
                 U: config.u_inf,
-                V: 0.0,
+                V: config.v_inf,
                 rho: config.rho_inf,
                 rho_art: config.rho_inf,
             };
 
             domain[[i, j]].flow_ijp12 = HalfPointFlow {
                 U: config.u_inf,
-                V: 0.0,
+                V: config.v_inf,
                 rho: config.rho_inf,
                 rho_art: config.rho_inf,
             };
@@ -197,13 +200,18 @@ pub fn calculate_metrics(grid: &Grid, domain: &mut Array2<PointData>) {
 
 /// Reconstructs the true Cartesian velocity field (u, v), density, and Mach number
 /// for all grid nodes after AF2 convergence.
-pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2<PointData>) {
+pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2<PointData>, gamma_n: f64) {
     println!("Calculating final Cartesian flow field variables...");
     
     let gamma = config.gamma;
     let m_inf = config.Mach_inf;
     let c_rho = (gamma - 1.0) / (gamma + 1.0);
     let mach_factor = 2.0 / (gamma + 1.0);
+
+    // Ensure wake-cut potential jump is synchronized before taking derivatives
+    for j in 0..grid.jmax {
+        domain[[0, j]].flow_ij.phi = domain[[grid.imax - 1, j]].flow_ij.phi + gamma_n;
+    }
 
     for j in 1..grid.jmax {
         for i in 1..grid.imax {
@@ -235,8 +243,15 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
             let eta_x = -jacobian * y_xi;
             let eta_y = jacobian * x_xi;
 
-            // Potential derivatives
-            let phi_xi = (domain[[i_plus, j]].flow_ij.phi - domain[[i_minus, j]].flow_ij.phi) / 2.0;
+            // Potential derivatives accounting for branch-cut jump across wake cut
+            // Left neighbor (i - 1): for i = 1, domain[[0, j]].phi is already phi_{NX, j} + Gamma
+            // Right neighbor (i + 1): for i = imax - 1 (NX), ghost node NX+1 has phi_{2, j} - Gamma
+            let phi_plus = if i == grid.imax - 1 {
+                domain[[1, j]].flow_ij.phi - gamma_n
+            } else {
+                domain[[i + 1, j]].flow_ij.phi
+            };
+            let phi_xi = (phi_plus - domain[[i - 1, j]].flow_ij.phi) / 2.0;
 
             let phi_eta = if j == grid.jmax - 1 {
                 // Wall flow tangency: V = A2*phi_xi + A3*phi_eta = 0 => phi_eta = -(A2/A3)*phi_xi
@@ -271,14 +286,15 @@ pub fn calculate_field(config: &config::Config, grid: &Grid, domain: &mut Array2
     // Farfield boundary at j = 0
     for i in 0..grid.imax {
         domain[[i, 0]].flow_ij.u = config.u_inf;
-        domain[[i, 0]].flow_ij.v = 0.0;
+        domain[[i, 0]].flow_ij.v = config.v_inf;
         domain[[i, 0]].flow_ij.rho = config.rho_inf;
         domain[[i, 0]].flow_ij.M = m_inf;
     }
 
-    // Sync wake cut (node 0 receives copy from node imax - 1)
+    // Sync wake cut (continuous velocity/density/Mach, discontinuous potential by +Gamma)
     for j in 0..grid.jmax {
         domain[[0, j]].flow_ij = domain[[grid.imax - 1, j]].flow_ij;
+        domain[[0, j]].flow_ij.phi = domain[[grid.imax - 1, j]].flow_ij.phi + gamma_n;
     }
 }
 

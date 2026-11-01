@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Language: Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org/)
 
-An efficient, high-fidelity 2D Computational Fluid Dynamics (CFD) solver for the **Full Potential Equation** in conservative form, developed in **Rust**. The solver is designed for structured O-grid topologies over symmetric and arbitrary 2D airfoils, employing the **Holst Artificial Density** scheme for shock capturing and the **AF2 (Approximate Factorization 2)** algorithm with cyclic Thomas (Sherman-Morrison) elimination for rapid convergence in subsonic and transonic flow regimes.
+An efficient, high-fidelity 2D Computational Fluid Dynamics (CFD) solver for the **Full Potential Equation** in conservative form, developed in **Rust**. The solver is designed for structured O-grid topologies over symmetric and arbitrary 2D airfoils (including lifting flows at non-zero Angle of Attack), employing the **Holst Artificial Density** scheme for shock capturing and the **AF2 (Approximate Factorization 2)** algorithm with cyclic Thomas (Sherman-Morrison) elimination for rapid convergence in subsonic and transonic flow regimes.
 
 ---
 
@@ -16,7 +16,7 @@ An efficient, high-fidelity 2D Computational Fluid Dynamics (CFD) solver for the
    - [Holst Artificial Density Scheme](#holst-artificial-density-scheme)
    - [AF2 Numerical Scheme on O-Grids](#af2-numerical-scheme-on-o-grids)
    - [Alpha Cycle & Dynamic Beta Control](#alpha-cycle--dynamic-beta-control)
-   - [Boundary Conditions](#boundary-conditions)
+   - [Boundary Conditions & Circulation](#boundary-conditions--circulation)
 3. [Project File Structure](#project-file-structure)
 4. [Compilation & Execution](#compilation--execution)
 5. [Configuration & Examples](#configuration--examples)
@@ -27,13 +27,12 @@ An efficient, high-fidelity 2D Computational Fluid Dynamics (CFD) solver for the
 
 ## Overview
 
-
 The Full Potential equation models compressible, inviscid, irrotational, and isentropic flow:
-- Capable of modeling subsonic, critical, and transonic flows with weak shock waves ($M_1 \le 1.3$).
+- Capable of modeling subsonic, critical, and transonic flows with weak shock waves ($M_1 \le 1.3$), both non-lifting and lifting (non-zero Angle of Attack with Kutta condition and compressible farfield vortex).
 - Solved in **strong conservative form** to guarantee mass conservation across captured shock discontinuities.
 - Implemented with **zero heap allocation** in the inner iteration loops using pre-allocated cyclic tridiagonal buffers.
 - Written in clean, safe, modern Rust leveraging the `ndarray` library.
-- Output format in .vtk, compatible with Paraview for results visualization.
+- Output format in `.vtk`, compatible with ParaView for results visualization.
 
 ![alt text](job_files/naca0012/naca0012_shockwave.png "Example Shock Wave")
 
@@ -112,7 +111,7 @@ This yields a two-step alternating factorization:
 
    Because $\overrightarrow{\delta}_\eta$ is a forward operator, the sweep marches backwards from the wall ($j = j_{\max} - 1$) down to the farfield ($j = 1$), initialized with the solid-wall condition $f_{i, NY+1} = 0$.
 
-3. **Step 2 (Azimuthal Sweep in $\xi$)**:
+2. **Step 2 (Azimuthal Sweep in $\xi$)**:
 
    $$\left( \alpha \overleftarrow{\delta}_\eta - \overrightarrow{\delta}_\xi A_i \overleftarrow{\delta}_\xi \pm \alpha \beta \overrightarrow{\overleftarrow{\delta}}_\xi \right) C_{i, j} = f_{i, j}$$
 
@@ -126,12 +125,18 @@ This yields a two-step alternating factorization:
 - **Dynamic $\beta$**: In supersonic zones, temporal damping $\beta_{\text{sup}}$ dynamically self-adjusts every $M$ iterations based on residual history:
   $$R_t^n = \frac{\text{RMS}^n}{\text{RMS}^{n-M}} + \frac{\text{Max}^n}{\text{Max}^{n-M}}$$
 
-### Boundary Conditions
+### Boundary Conditions & Circulation
 
-- **Farfield ($j = 0$)**: Dirichlet boundary condition matching freestream potential $\phi_\infty = u_\infty x$.
+- **Farfield ($j = 0$)**: Dirichlet boundary condition superposing the inclined freestream potential $\phi_\infty = u_\infty x + v_\infty y$ and a compressible point vortex located at the quarter-chord ($x_{1/4} = 0.25, y_{1/4} = 0$):
+  $$\phi_{i, 1} = \phi_\infty + \phi_{\text{vortex}} = (u_\infty x + v_\infty y) - \frac{\Gamma^n}{2\pi} \tan^{-1}\left( \frac{\sqrt{1 - M_\infty^2} \, y}{x - 0.25} \right)$$
 - **Solid Wall ($j = j_{\max} - 1$)**: Flow tangency condition $V = 0 \implies \phi_\eta = -\frac{A_2}{A_3} \phi_\xi$. Mass flux across the wall is satisfied via the linear reflection relation:
   $$\Delta \text{Flux}_\eta = -2 \left( \frac{\bar{\rho} V}{J} \right)_{i, NY - 1/2}$$
-- **Wake Cut Periodicity ($i = 0$ and $i = i_{\max} - 1$)**: Strict cyclic identity for non-lifting symmetric flows.
+- **Wake Cut Jump & Kutta Condition ($i = 0$ and $i = i_{\max} - 1$)**:
+  - Across the trailing-edge branch cut, all physical flow properties ($\vec{q}, \rho, M, p$) remain continuous, while the velocity potential experiences a jump equal to the bound circulation $\Gamma^n$:
+    $$\phi^n_{1, j} = \phi^n_{NX, j} + \Gamma^n, \qquad \phi^n_{NX+1, j} = \phi^n_{2, j} - \Gamma^n$$
+  - The circulation $\Gamma^n$ is governed by the trailing-edge **Kutta condition** $(\phi_\xi)_{NX, NY} = 0$, yielding $\tilde{\Gamma}^n = \phi^n_{2, NY} - \phi^n_{NX-1, NY}$, which is under-relaxed ($R_g \cong 0.5$) and combined with a linear temporal estimate:
+    $$\bar{\Gamma}^n = R_g \tilde{\Gamma}^n + (1 - R_g) \Gamma^{n-1}, \qquad \Gamma^n_{\text{estimado}} = 2\Gamma^{n-1} - \Gamma^{n-2}, \qquad \Gamma^n = \frac{1}{2} \left( \bar{\Gamma}^n + \Gamma^n_{\text{estimado}} \right)$$
+  - During Step 2 of AF2, the implicit wake-cut jump $C^n_{2, j} - C^n_{NX+1, j} \cong \Gamma^n - \Gamma^{n-1}$ is injected into the cyclic tridiagonal RHS.
 
 ---
 
@@ -149,9 +154,11 @@ RustPotential/
 │   ├── naca0012_mesh.vtk         # NACA 0012 airfoil (93 x 15)
 │   └── naca0012_fine_mesh.vtk    # Fine NACA 0012 mesh (713 x 150)
 ├── job_files/               # Output solution directory (auto-generated)
-│   └── biconvex/
+│   └── <jobname>_<YYYY-MM-DD_HH-MM-SS>/
 │       ├── solution.vtk          # Full 3D VTK flow field (M, rho, phi, u, v, metrics)
-│       └── Cp_distribution.csv   # Wall pressure coefficient profile (x, y, Cp)
+│       ├── Cp_distribution.csv   # Wall pressure coefficient profile (x, y, Cp)
+│       ├── solver_config.txt     # Complete solver parameters and mesh specifications
+│       └── job_config.toml       # Exact snapshot copy of simulation TOML config
 ├── scripts/                 # Utility post-processing scripts
 │   └── plot_cp.py                # Python/Matplotlib script to plot surface Cp
 └── src/                     # Rust source code
@@ -195,21 +202,23 @@ All parameters are controlled via [`job_config.toml`](job_config.toml):
 
 ```toml
 # ===================================================
-# Full Potential Solver Configuration
+# RustPotential Solver Configuration
 # ===================================================
 
 # Mesh and output naming
-meshname = "mesh/biconvex_mesh.vtk"
-jobname  = "biconvex"
+meshname = "mesh/naca0012_mesh.vtk"
+jobname  = "naca0012"
 
 # Flow conditions
-Mach_inf = 0.3          # Freestream Mach number
+Mach_inf = 0.75         # Freestream Mach number
+AoA      = 2.0          # Angle of attack (degrees)
 gamma    = 1.4          # Specific heat ratio
 
-# AF2 Solver controls
-max_iterations        = 500
+# AF2 Solver & Circulation controls
+max_iterations        = 4000
 convergence_residual  = 1E-5
 omega                 = 1.0    # Relaxation factor
+Rg                    = 0.5    # Circulation under-relaxation factor
 beta_mult             = 2.5    # Supersonic temporal damping multiplier
 alpha_sequence_length = 8      # Length of Holst alpha cycle (M)
 C                     = 1.5    # Holst artificial density coefficient
@@ -218,7 +227,7 @@ C                     = 1.5    # Holst artificial density coefficient
 export_metrics        = true   # Export metric tensors into VTK
 ```
 
-### Reference Benchmark: 10% Biconvex Airfoil ($M_\infty = 0.3$)
+### Reference Benchmark: 10% Biconvex Airfoil ($M_\infty = 0.3, \text{AoA} = 0^\circ$)
 - **Convergence**: Achieved in **415 iterations** (~0.57 seconds in release mode).
 - **Stagnation $C_p$**: $+1.0227$ at leading and trailing edges (exact match to analytical compressible stagnation formula).
 - **Suction Peak**: $C_{p,\min} = -0.2882$ at mid-chord crest ($x = 0.50$).
@@ -277,4 +286,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-

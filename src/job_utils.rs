@@ -6,6 +6,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::io::{Write, BufWriter};
+use std::time::SystemTime;
 use ndarray::Array2; 
 
 // ==========================================
@@ -44,9 +45,137 @@ pub fn read_config(filename: &str) -> config::Config {
     config
 }
 
-pub fn init_job_directory(config: &config::Config) {
-    let jobname = &config.jobname;
-    std::fs::create_dir_all(format!("job_files/{}", jobname)).unwrap();
+/// Generates a timestamp string YYYY-MM-DD_HH-MM-SS from system time.
+fn current_timestamp_string() -> String {
+    let now = SystemTime::now();
+    let duration = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_secs = duration.as_secs();
+
+    // Deconstruct seconds into date and time
+    let sec = total_secs % 60;
+    let total_min = total_secs / 60;
+    let min = total_min % 60;
+    let total_hours = total_min / 60;
+    let hour = total_hours % 24;
+
+    // Convert days since UNIX epoch (1970-01-01) to Year-Month-Day
+    let mut days = (total_hours / 24) as i64;
+    // 1970-01-01 was a Thursday
+    let mut year = 1970i32;
+
+    loop {
+        let leap = is_leap_year(year);
+        let days_in_year = if leap { 366 } else { 365 };
+        if days >= days_in_year {
+            days -= days_in_year;
+            year += 1;
+        } else {
+            break;
+        }
+    }
+
+    let leap = is_leap_year(year);
+    let days_in_months = [
+        31, if leap { 29 } else { 28 }, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31,
+    ];
+
+    let mut month = 1usize;
+    for &dim in &days_in_months {
+        if days >= dim as i64 {
+            days -= dim as i64;
+            month += 1;
+        } else {
+            break;
+        }
+    }
+    let day = (days + 1) as usize;
+
+    format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", year, month, day, hour, min, sec)
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+/// Creates a unique output directory incorporating jobname and date/timestamp.
+pub fn init_job_directory(config: &mut config::Config) {
+    let timestamp = current_timestamp_string();
+    let folder_name = format!("{}_{}", config.jobname, timestamp);
+    let output_dir = format!("job_files/{}", folder_name);
+    
+    std::fs::create_dir_all(&output_dir)
+        .unwrap_or_else(|_| panic!("Failed to create job output directory: {}", output_dir));
+    
+    config.output_dir = output_dir;
+}
+
+/// Exports solver configuration and mesh information into a human-readable config summary file.
+pub fn save_solver_configuration(config: &config::Config, grid: &Grid) {
+    let summary_path = format!("{}/solver_config.txt", config.output_dir);
+    let file = File::create(&summary_path)
+        .unwrap_or_else(|_| panic!("Failed to create solver configuration file: {}", summary_path));
+    let mut writer = BufWriter::new(file);
+
+    let total_nodes = grid.imax * grid.jmax;
+    let regime = if config.Mach_inf < 0.8 {
+        "Subsonic"
+    } else if config.Mach_inf <= 1.2 {
+        "Transonic"
+    } else {
+        "Supersonic"
+    };
+
+    writeln!(writer, "================================================================================").unwrap();
+    writeln!(writer, "                    RUSTPOTENTIAL SOLVER CONFIGURATION                          ").unwrap();
+    writeln!(writer, "================================================================================").unwrap();
+    writeln!(writer, "Job Name                : {}", config.jobname).unwrap();
+    writeln!(writer, "Output Directory        : {}", config.output_dir).unwrap();
+    writeln!(writer, "").unwrap();
+    writeln!(writer, "--------------------------------------------------------------------------------").unwrap();
+    writeln!(writer, "  MESH SPECIFICATIONS                                                           ").unwrap();
+    writeln!(writer, "--------------------------------------------------------------------------------").unwrap();
+    writeln!(writer, "Mesh File               : {}", config.meshname).unwrap();
+    writeln!(writer, "Grid Dimensions (imax)  : {} (Azimuthal / Xi direction)", grid.imax).unwrap();
+    writeln!(writer, "Grid Dimensions (jmax)  : {} (Radial / Eta direction)", grid.jmax).unwrap();
+    writeln!(writer, "Total Grid Nodes        : {}", total_nodes).unwrap();
+    writeln!(writer, "Wake Cut Node Pair      : i = 0 <-> i = {}", grid.imax - 1).unwrap();
+    writeln!(writer, "Farfield Boundary       : j = 0").unwrap();
+    writeln!(writer, "Airfoil Wall Boundary   : j = {}", grid.jmax - 1).unwrap();
+    writeln!(writer, "").unwrap();
+    writeln!(writer, "--------------------------------------------------------------------------------").unwrap();
+    writeln!(writer, "  FLOW & FLIGHT PARAMETERS                                                      ").unwrap();
+    writeln!(writer, "--------------------------------------------------------------------------------").unwrap();
+    writeln!(writer, "Freestream Mach (M_inf) : {:.6} ({})", config.Mach_inf, regime).unwrap();
+    writeln!(writer, "Angle of Attack (AoA)   : {:.4} deg ({:.6} rad)", config.AoA, config.alpha_rad).unwrap();
+    writeln!(writer, "Specific Heat Ratio (g) : {:.4}", config.gamma).unwrap();
+    writeln!(writer, "Freestream Speed (q_inf): {:.6} (non-dimensional)", config.q_inf).unwrap();
+    writeln!(writer, "Freestream Velocity u   : {:.6}", config.u_inf).unwrap();
+    writeln!(writer, "Freestream Velocity v   : {:.6}", config.v_inf).unwrap();
+    writeln!(writer, "Freestream Density (rho): {:.6}", config.rho_inf).unwrap();
+    writeln!(writer, "").unwrap();
+    writeln!(writer, "--------------------------------------------------------------------------------").unwrap();
+    writeln!(writer, "  AF2 NUMERICAL SCHEME CONTROLS                                                 ").unwrap();
+    writeln!(writer, "--------------------------------------------------------------------------------").unwrap();
+    writeln!(writer, "Max Iterations          : {}", config.max_iterations).unwrap();
+    writeln!(writer, "Convergence Tolerance   : {:.2e}", config.convergence_residual).unwrap();
+    writeln!(writer, "Relaxation Factor (w)   : {:.4}", config.omega).unwrap();
+    writeln!(writer, "Circulation Relax (Rg)  : {:.4}", config.Rg).unwrap();
+    writeln!(writer, "Alpha Sequence Length M : {}", config.alpha_sequence_length).unwrap();
+    writeln!(writer, "Supersonic Damping Beta : {:.4}", config.beta_mult).unwrap();
+    writeln!(writer, "Holst Upwind Coeff (C)  : {:.4}", config.C).unwrap();
+    writeln!(writer, "Export Geometric Metrics: {}", config.export_metrics).unwrap();
+    writeln!(writer, "================================================================================").unwrap();
+
+    // Also write a copy of job_config.toml into the folder for exact reproduction
+    if let Ok(config_copy) = fs::read_to_string("job_config.toml") {
+        let toml_dest = format!("{}/job_config.toml", config.output_dir);
+        let _ = fs::write(toml_dest, config_copy);
+    }
+
+    println!("Solver configuration saved to: {}", summary_path);
 }
 
 // ==========================================
@@ -109,8 +238,8 @@ pub fn read_vtk_structured_grid(filepath: &str) -> Grid {
 
 
 pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<solver_utils::PointData>) {
-    let file_path = format!("job_files/{}/solution.vtk", config.jobname);
-    let file = File::create(&file_path).unwrap_or_else(|_| panic!("Failed to create VTK output file: {}", config.jobname));
+    let file_path = format!("{}/solution.vtk", config.output_dir);
+    let file = File::create(&file_path).unwrap_or_else(|_| panic!("Failed to create VTK output file: {}", file_path));
     let mut writer = BufWriter::new(file);
 
     // Internal closure to use the '?' operator without dirtying the main function signature
@@ -227,7 +356,7 @@ pub fn export_vtk_fields(config: &config::Config, grid: &Grid, domain: &Array2<s
 pub fn export_cp_csv(config: &config::Config, grid: &Grid, domain: &Array2<PointData>) {
     println!("Exporting Cp distribution to CSV...");
 
-    let filename = format!("job_files/{}/Cp_distribution.csv", config.jobname);
+    let filename = format!("{}/Cp_distribution.csv", config.output_dir);
     let mut file = File::create(&filename).unwrap_or_else(|_| panic!("Failed to create CSV file: {}", filename));
 
     writeln!(file, "x,y,Cp").unwrap();

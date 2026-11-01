@@ -38,11 +38,13 @@ r#"-----------------------------------------------------------------------------
   JOB & MESH SPECIFICATIONS
 --------------------------------------------------------------------------------
   Job Name             : {}
+  Output Directory     : {}
   Mesh File            : {}
   Grid Dimensions      : {} x {} ({} total nodes)
   Flow Regime          : M_inf = {:.4} ({})
+  Angle of Attack      : AoA = {:.2} deg
   Specific Heat Ratio  : gamma = {:.2}
-  Freestream Speed     : u_inf = {:.6} (non-dimensional)
+  Freestream Speed     : q_inf = {:.6} (u = {:.6}, v = {:.6})
   Freestream Density   : rho_inf = {:.6} (non-dimensional)
 --------------------------------------------------------------------------------
   AF2 ITERATION PARAMETERS
@@ -50,23 +52,29 @@ r#"-----------------------------------------------------------------------------
   Max Iterations       : {}
   Tolerance (Max Res)  : {:.2e}
   Relaxation Factor    : omega = {:.2}
+  Circulation Relax    : Rg = {:.2}
   Alpha Cycle Length   : M = {}
   Temporal Damping     : beta_sub = 0.30, beta_sup = {:.2}
   Holst Upwind Coeff   : C = {:.2}
 --------------------------------------------------------------------------------"#,
         config.jobname,
+        config.output_dir,
         config.meshname,
         grid.imax,
         grid.jmax,
         total_nodes,
         config.Mach_inf,
         regime,
+        config.AoA,
         config.gamma,
+        config.q_inf,
         config.u_inf,
+        config.v_inf,
         config.rho_inf,
         config.max_iterations,
         config.convergence_residual,
         config.omega,
+        config.Rg,
         config.alpha_sequence_length,
         config.beta_mult,
         config.C
@@ -76,23 +84,30 @@ r#"-----------------------------------------------------------------------------
 /// Prints the table header for the iterative AF2 solver loop.
 pub fn print_iteration_header() {
     println!(
-r#"+-------+--------------+--------------+------------+--------------------+
-| Iter  |   Max Res    |   RMS Res    |  Sup Beta  | Status             |
-+-------+--------------+--------------+------------+--------------------+"#
+r#"+-------+--------------+--------------+--------------+------------+--------------------+
+| Iter  |   Max Res    |   RMS Res    | Circulation  |  Sup Beta  | Status             |
++-------+--------------+--------------+--------------+------------+--------------------+"#
     );
 }
 
 /// Prints a single row in the iteration table.
-pub fn print_iteration_row(iteration: usize, max_res: f64, rms_res: f64, beta_sup: f64, status: &str) {
+pub fn print_iteration_row(
+    iteration: usize,
+    max_res: f64,
+    rms_res: f64,
+    gamma_n: f64,
+    beta_sup: f64,
+    status: &str,
+) {
     println!(
-        "| {:5} |   {:.4e}   |   {:.4e}   |    {:5.2}   | {:<18} |",
-        iteration, max_res, rms_res, beta_sup, status
+        "| {:5} |   {:.4e}   |   {:.4e}   |  {:+.4e}  |    {:5.2}   | {:<18} |",
+        iteration, max_res, rms_res, gamma_n, beta_sup, status
     );
 }
 
 /// Prints the footer closing line for the iteration table.
 pub fn print_iteration_footer() {
-    println!("+-------+--------------+--------------+------------+--------------------+");
+    println!("+-------+--------------+--------------+--------------+------------+--------------------+");
 }
 
 /// Displays a comprehensive post-computation summary with aerodynamic figures of merit.
@@ -118,26 +133,50 @@ pub fn print_summary(
         if m < min_mach { min_mach = m; }
     }
 
-    // 2. Wall Cp extrema
+    // 2. Wall Cp extrema and surface force integration (Cn, Ca -> Cl, Cd)
     let mut cp_min = f64::MAX;
     let mut x_cp_min = 0.0f64;
     let mut cp_max = -f64::MAX;
     let mut x_cp_max = 0.0f64;
 
-    for i in 0..grid.imax - 1 {
-        let x = grid.points[[i, j_wall]].x;
-        let rho = domain[[i, j_wall]].flow_ij.rho;
-        let cp = cp_multiplier * ((rho / rho_inf).powf(gamma) - 1.0);
+    let mut cn = 0.0f64;
+    let mut ca = 0.0f64;
 
-        if cp < cp_min {
-            cp_min = cp;
-            x_cp_min = x;
+    for i in 0..grid.imax - 1 {
+        let x0 = grid.points[[i, j_wall]].x;
+        let y0 = grid.points[[i, j_wall]].y;
+        let rho0 = domain[[i, j_wall]].flow_ij.rho;
+        let cp0 = cp_multiplier * ((rho0 / rho_inf).powf(gamma) - 1.0);
+
+        let x1 = grid.points[[i + 1, j_wall]].x;
+        let y1 = grid.points[[i + 1, j_wall]].y;
+        let rho1 = domain[[i + 1, j_wall]].flow_ij.rho;
+        let cp1 = cp_multiplier * ((rho1 / rho_inf).powf(gamma) - 1.0);
+
+        if cp0 < cp_min {
+            cp_min = cp0;
+            x_cp_min = x0;
         }
-        if cp > cp_max {
-            cp_max = cp;
-            x_cp_max = x;
+        if cp0 > cp_max {
+            cp_max = cp0;
+            x_cp_max = x0;
         }
+
+        // Trapezoidal integration around counter-clockwise O-grid contour (chord = 1.0)
+        let cp_avg = 0.5 * (cp0 + cp1);
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        cn += cp_avg * dx;
+        ca -= cp_avg * dy;
     }
+
+    let cl = cn * config.alpha_rad.cos() - ca * config.alpha_rad.sin();
+    let cd = cn * config.alpha_rad.sin() + ca * config.alpha_rad.cos();
+    let cl_kj = if config.q_inf > 1e-12 {
+        2.0 * stats.final_gamma / config.q_inf
+    } else {
+        0.0
+    };
 
     // Exact theoretical isentropic stagnation Cp
     let p_ratio_stag = (1.0 + 0.5 * (gamma - 1.0) * m_inf.powi(2)).powf(gamma / (gamma - 1.0));
@@ -169,15 +208,19 @@ r#"
 --------------------------------------------------------------------------------
                          AERODYNAMIC FIELD RESULTS
 --------------------------------------------------------------------------------
-  Freestream Mach      : {:.4}
+  Freestream Condition : M_inf = {:.4}, AoA = {:.2} deg
   Flowfield Mach Range : [{:.4}, {:.4}]
+  Final Circulation    : Gamma = {:+.6}
+  Lift Coefficient Cl  : {:+.4} (Kutta-Joukowski: {:+.4})
+  Drag Coefficient Cd  : {:+.4}
   Stagnation Cp (Wall) : {:+.4} (Theoretical: {:+.4}) at x = {:.3}
   Suction Peak Cp_min  : {:+.4} at x = {:.3}
 --------------------------------------------------------------------------------
                            OUTPUT FILES GENERATED
 --------------------------------------------------------------------------------
-  [VTK 3D Solution]    : job_files/{}/solution.vtk
-  [Wall Cp Profile]    : job_files/{}/Cp_distribution.csv
+  [VTK 3D Solution]    : {}/solution.vtk
+  [Wall Cp Profile]    : {}/Cp_distribution.csv
+  [Configuration]      : {}/solver_config.txt
 ================================================================================
 Job completed successfully!"#,
         status_str,
@@ -187,15 +230,21 @@ Job completed successfully!"#,
         total_ms,
         ms_per_iter,
         m_inf,
+        config.AoA,
         min_mach,
         max_mach,
+        stats.final_gamma,
+        cl,
+        cl_kj,
+        cd,
         cp_max,
         cp_stag_theory,
         x_cp_max,
         cp_min,
         x_cp_min,
-        config.jobname,
-        config.jobname
+        config.output_dir,
+        config.output_dir,
+        config.output_dir
     );
 }
 

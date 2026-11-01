@@ -1,5 +1,5 @@
 # ===================================================
-# This file is used to configure the RustyMesher job.
+# RustPotential Solver Configuration
 # ===================================================
 
 # jobname (used for directory and files creation)
@@ -11,9 +11,13 @@ jobname = "naca0012"
 
 export_metrics = true
 
-Mach_inf = 0.95
+Mach_inf = 0.6
 
-max_iterations = 2000
+AoA = 1.0
+
+Rg = 0.5
+
+max_iterations = 4000
 
 omega = 1.0
 
@@ -26,3 +30,5 @@ convergence_residual = 1E-5
 gamma = 1.4
 
 C = 1.5
+
+
